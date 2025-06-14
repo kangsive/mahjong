@@ -16,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from ui.main_menu import MainMenu
 from game.game_engine import GameEngine
 from utils.logger import setup_logger
+from utils.font_config import font_config
 
 class MahjongApp:
     def __init__(self):
@@ -46,14 +47,18 @@ class MahjongApp:
         style = ttk.Style()
         style.theme_use('clam')
         
+        # 获取最佳字体配置
+        title_font = font_config.get_title_font()
+        normal_font = font_config.get_normal_font()
+        
         # 自定义样式
         style.configure('Title.TLabel', 
-                       font=('Microsoft YaHei', 16, 'bold'),
+                       font=title_font,
                        background='#2c3e50',
                        foreground='#ecf0f1')
         
         style.configure('Custom.TButton',
-                       font=('Microsoft YaHei', 12),
+                       font=normal_font,
                        padding=10)
     
     def run(self):

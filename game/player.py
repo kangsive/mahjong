@@ -39,6 +39,7 @@ class Player:
         self.name = name
         self.player_type = player_type
         self.position = position  # 0:东, 1:南, 2:西, 3:北
+        self.player_id = position  # 添加player_id属性，与position保持一致
         
         # 手牌
         self.hand_tiles: List[Tile] = []
@@ -56,6 +57,10 @@ class Player:
         
         # 四川麻将特有
         self.missing_suit: Optional[str] = None  # 缺的花色
+        
+        # 事件回调函数
+        self.on_tile_exchange_start = None  # 换三张开始回调
+        self.on_missing_suit_selection_start = None  # 选择缺一门开始回调
         
     def add_tile(self, tile: Tile):
         """添加一张牌到手牌"""

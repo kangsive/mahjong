@@ -9,6 +9,7 @@ from typing import Optional
 
 from game.game_engine import GameEngine, GameMode
 from .game_window import GameWindow
+from utils.font_config import font_config
 
 class MainMenu:
     """主菜单类"""
@@ -43,7 +44,7 @@ class MainMenu:
         # 副标题
         subtitle_label = ttk.Label(main_frame, 
                                   text="支持训练模式和竞技模式的智能麻将游戏",
-                                  font=('Microsoft YaHei', 12),
+                                  font=font_config.get_normal_font(),
                                   foreground='#7f8c8d')
         subtitle_label.grid(row=1, column=0, pady=(0, 40))
         
@@ -104,7 +105,7 @@ class MainMenu:
         """
         
         info_label = ttk.Label(info_frame, text=info_text.strip(), 
-                              justify=tk.LEFT, font=('Microsoft YaHei', 10))
+                              justify=tk.LEFT, font=font_config.get_small_font())
         info_label.grid(row=0, column=0, sticky=(tk.W, tk.E))
         
         # 底部按钮
@@ -127,12 +128,12 @@ class MainMenu:
             rule_type = self.rule_var.get()
             self.game_engine.setup_game(GameMode.TRAINING, rule_type)
             
+            # 先隐藏主菜单，再创建游戏窗口
+            self.hide_menu()
+            
             # 创建游戏窗口
             self.game_window = GameWindow(self.root, self.game_engine, 
                                         is_training_mode=True)
-            
-            # 隐藏主菜单
-            self.hide_menu()
             
         except Exception as e:
             messagebox.showerror("错误", f"启动训练模式失败: {e}")
@@ -143,12 +144,12 @@ class MainMenu:
             rule_type = self.rule_var.get()
             self.game_engine.setup_game(GameMode.COMPETITIVE, rule_type)
             
+            # 先隐藏主菜单，再创建游戏窗口
+            self.hide_menu()
+            
             # 创建游戏窗口
             self.game_window = GameWindow(self.root, self.game_engine, 
                                         is_training_mode=False)
-            
-            # 隐藏主菜单
-            self.hide_menu()
             
         except Exception as e:
             messagebox.showerror("错误", f"启动竞技模式失败: {e}")
@@ -195,7 +196,7 @@ class MainMenu:
         text_frame = ttk.Frame(help_window, padding="10")
         text_frame.pack(fill=tk.BOTH, expand=True)
         
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=('Microsoft YaHei', 10))
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=font_config.get_small_font())
         scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
         

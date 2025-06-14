@@ -61,10 +61,14 @@ class GameEngine:
         self.last_discard_player: Optional[Player] = None
         self.game_history: List[Dict] = []
         
+        # 新增：公共出牌池
+        self.discard_pool: List[Tuple[Tile, str]] = []  # (牌, 玩家名)
+        
         # 回调函数
         self.on_game_state_changed: Optional[Callable] = None
         self.on_player_action: Optional[Callable] = None
         self.on_game_over: Optional[Callable] = None
+        self.on_ai_turn_start: Optional[Callable] = None  # 新增：AI回合开始回调
         
         # 换三张相关
         self.exchange_tiles: Dict[int, List[Tile]] = {}  # 玩家选择的换牌
@@ -114,6 +118,10 @@ class GameEngine:
         self.state = GameState.WAITING
         self.logger.info(f"游戏设置完成: {mode.value}, {rule_type}")
     
+    def start_game(self):
+        """开始游戏（兼容接口）"""
+        return self.start_new_game()
+    
     def start_new_game(self):
         """开始新游戏"""
         if not self.deck or not self.rule or not self.players:
@@ -132,6 +140,14 @@ class GameEngine:
         
         # 重置牌堆
         self.deck.reset()
+        
+        # 初始化活跃玩家列表
+        self.active_players = list(range(len(self.players)))
+        self.winners = []
+        
+        # 初始化换牌和缺门字典
+        self.exchange_tiles = {}
+        self.missing_suits = {i: None for i in range(len(self.players))}
         
         # 开始发牌
         self.state = GameState.DEALING
@@ -179,8 +195,36 @@ class GameEngine:
         
         # 通知所有玩家开始选择换牌
         for player in self.players:
-            if hasattr(player, 'on_tile_exchange_start'):
+            if hasattr(player, 'on_tile_exchange_start') and player.on_tile_exchange_start:
                 player.on_tile_exchange_start(self.exchange_direction)
+        
+        # AI玩家自动选择换牌
+        self._ai_auto_exchange()
+    
+    def _ai_auto_exchange(self):
+        """AI玩家自动选择换牌"""
+        for i, player in enumerate(self.players):
+            if player.player_type != PlayerType.HUMAN:
+                # AI自动选择换牌
+                self._ai_choose_exchange_tiles(i, player)
+    
+    def _ai_choose_exchange_tiles(self, player_id: int, player: Player):
+        """AI选择换牌"""
+        # 按花色分组
+        suits = {}
+        for tile in player.hand_tiles:
+            if tile.tile_type not in suits:
+                suits[tile.tile_type] = []
+            suits[tile.tile_type].append(tile)
+        
+        # 选择数量最多的花色的前三张牌
+        if suits:
+            max_suit = max(suits.keys(), key=lambda s: len(suits[s]))
+            exchange_tiles = suits[max_suit][:3]
+            
+            if len(exchange_tiles) == 3:
+                self.submit_exchange_tiles(player_id, exchange_tiles)
+                self.logger.info(f"AI玩家 {player_id} 自动选择换牌: {[str(t) for t in exchange_tiles]}")
     
     def submit_exchange_tiles(self, player_id: int, tiles: List[Tile]) -> bool:
         """
@@ -276,8 +320,30 @@ class GameEngine:
         
         # 通知所有玩家选择缺门
         for player in self.players:
-            if hasattr(player, 'on_missing_suit_selection_start'):
+            if hasattr(player, 'on_missing_suit_selection_start') and player.on_missing_suit_selection_start:
                 player.on_missing_suit_selection_start()
+        
+        # AI玩家自动选择缺门
+        self._ai_auto_choose_missing_suit()
+    
+    def _ai_auto_choose_missing_suit(self):
+        """AI玩家自动选择缺门"""
+        for i, player in enumerate(self.players):
+            if player.player_type != PlayerType.HUMAN:
+                # AI自动选择缺门
+                self._ai_choose_missing_suit(i, player)
+    
+    def _ai_choose_missing_suit(self, player_id: int, player: Player):
+        """AI选择缺门"""
+        # 统计各花色数量，选择最少的
+        suit_counts = {TileType.WAN: 0, TileType.TONG: 0, TileType.TIAO: 0}
+        for tile in player.hand_tiles:
+            if tile.tile_type in suit_counts:
+                suit_counts[tile.tile_type] += 1
+        
+        missing_suit = min(suit_counts.keys(), key=lambda s: suit_counts[s])
+        self.submit_missing_suit(player_id, missing_suit)
+        self.logger.info(f"AI玩家 {player_id} 自动选择缺{missing_suit.value}")
     
     def submit_missing_suit(self, player_id: int, suit: TileType) -> bool:
         """
@@ -312,17 +378,37 @@ class GameEngine:
     def _start_playing(self):
         """开始游戏阶段"""
         self.state = GameState.PLAYING
-        self.current_player_index = 0
+        self.current_player_index = 0  # 庄家先开始
         
-        # 庄家摸第一张牌
-        if self.active_players:
-            first_player = self.players[self.current_player_index]
-            tile = self.deck.draw_tile()
-            if tile:
-                first_player.add_tile_to_hand(tile)
-                first_player.sort_hand()
+        # 清空出牌池
+        self.discard_pool = []
         
-        self.logger.info("游戏阶段开始")
+        # 确保所有玩家的missing_suit属性已设置
+        for i, player in enumerate(self.players):
+            if hasattr(player, 'missing_suit') and not player.missing_suit:
+                # 从missing_suits字典中获取缺门信息
+                missing_suit_type = self.missing_suits.get(i)
+                if missing_suit_type:
+                    player.missing_suit = missing_suit_type.value
+        
+        self.logger.info("游戏阶段开始，庄家开始出牌")
+        
+        # 通知游戏状态变化
+        self._notify_state_changed()
+        
+        # 启动第一个玩家的回合（如果是AI自动开始）
+        self._start_player_turn()
+    
+    def _start_player_turn(self):
+        """开始玩家回合"""
+        current_player = self.get_current_player()
+        if current_player:
+            self.logger.info(f"轮到 {current_player.name} 出牌")
+            
+            # 如果是AI玩家，通知UI启动AI回合
+            if current_player.player_type != PlayerType.HUMAN:
+                if self.on_ai_turn_start:
+                    self.on_ai_turn_start(current_player)
     
     def get_current_player(self) -> Player:
         """获取当前玩家"""
@@ -396,18 +482,60 @@ class GameEngine:
         if not player.remove_tile(tile):
             return False
         
+        # 添加到公共出牌池
+        self.discard_pool.append((tile, player.name))
+        
+        # 也添加到牌堆的弃牌区（保持兼容性）
         self.deck.discard_tile(tile)
         self.last_discarded_tile = tile
         self.last_discard_player = player
         
-        # 检查其他玩家是否可以胡牌
-        for other_player in self.players:
-            if other_player != player and self.rule.can_win(other_player, tile):
-                other_player.can_win = True
+        self.logger.info(f"{player.name} 打出了 {tile}")
         
-        self._next_player()
-        self._notify_player_action(player, GameAction.DISCARD, tile)
+        # 检查其他玩家是否可以胡牌、碰牌、杠牌
+        response_actions = self._check_response_actions(player, tile)
+        
+        if response_actions:
+            # 有玩家可以响应，进入等待响应状态
+            self.state = GameState.WAITING_ACTION
+            self._notify_player_action(player, GameAction.DISCARD, {"tile": tile, "response_actions": response_actions})
+        else:
+            # 无人响应，直接进入下一玩家回合
+            self._next_player()
+            self._notify_player_action(player, GameAction.DISCARD, tile)
+            
         return True
+    
+    def _check_response_actions(self, discard_player: Player, tile: Tile) -> Dict[int, List[GameAction]]:
+        """检查其他玩家可以执行的响应动作"""
+        response_actions = {}
+        
+        for i, player in enumerate(self.players):
+            if player == discard_player:
+                continue
+                
+            actions = []
+            
+            # 检查胡牌
+            if self.rule and self.rule.can_win(player, tile):
+                actions.append(GameAction.WIN)
+            
+            # 检查杠牌
+            if player.can_gang(tile):
+                actions.append(GameAction.GANG)
+            
+            # 检查碰牌
+            if player.can_peng(tile):
+                actions.append(GameAction.PENG)
+            
+            # 四川麻将不支持吃牌
+            # if self.rule_type != "sichuan" and player.can_chi(tile):
+            #     actions.append(GameAction.CHI)
+            
+            if actions:
+                response_actions[i] = actions
+        
+        return response_actions
     
     def _execute_peng(self, player: Player) -> bool:
         """执行碰牌"""
@@ -478,17 +606,28 @@ class GameEngine:
     
     def _next_player(self):
         """下一个玩家"""
+        # 切换到下一个玩家
         self.current_player_index = (self.current_player_index + 1) % len(self.players)
-        
-        # 摸牌
         current_player = self.get_current_player()
-        new_tile = self.deck.draw_tile()
-        if new_tile:
-            current_player.add_tile(new_tile)
         
-        # 检查是否可以胡牌
-        if self.rule.can_win(current_player):
+        self.logger.info(f"切换到下一个玩家: {current_player.name}")
+        
+        # 摸牌（除了第一次庄家出牌，其他情况都要摸牌）
+        if self.deck and self.deck.get_remaining_count() > 0:
+            new_tile = self.deck.draw_tile()
+            if new_tile:
+                current_player.add_tile(new_tile)
+                self.logger.info(f"{current_player.name} 摸了一张牌: {new_tile}")
+            else:
+                self.logger.warning("摸牌失败，牌堆可能已空")
+        
+        # 检查自摸胡牌
+        if self.rule and self.rule.can_win(current_player):
             current_player.can_win = True
+            self.logger.info(f"{current_player.name} 可以自摸胡牌")
+        
+        # 启动玩家回合
+        self._start_player_turn()
     
     def set_player_missing_suit(self, player: Player, suit: str) -> bool:
         """设置玩家缺门"""
@@ -549,7 +688,10 @@ class GameEngine:
             'round_number': self.round_number,
             'remaining_tiles': self.deck.get_remaining_count() if self.deck else 0,
             'missing_suits': self.missing_suits,
-            'exchange_direction': self.exchange_direction if hasattr(self, 'exchange_direction') else None
+            'exchange_direction': self.exchange_direction if hasattr(self, 'exchange_direction') else None,
+            'discard_pool': self.discard_pool,  # 新增：出牌池
+            'last_discarded_tile': str(self.last_discarded_tile) if self.last_discarded_tile else None,
+            'last_discard_player': self.last_discard_player.name if self.last_discard_player else None
         }
     
     def get_player_info(self, player_id: int) -> Optional[Dict[str, Any]]:
@@ -558,12 +700,25 @@ class GameEngine:
             return None
         
         player = self.players[player_id]
+        
+        # 方位信息
+        positions = ["东", "南", "西", "北"]
+        
         return {
             'player_id': player_id,
             'name': player.name,
+            'position': positions[player_id],  # 新增：方位
             'hand_count': len(player.hand_tiles),
-            'melds': player.melds,
+            'hand_tiles': [str(tile) for tile in player.hand_tiles] if player.player_type == PlayerType.HUMAN else [],
+            'melds': [{'type': meld.meld_type, 'tiles': [str(t) for t in meld.tiles]} for meld in player.melds],  # 新增：明牌
             'missing_suit': self.missing_suits.get(player_id),
             'is_active': player_id in self.active_players,
-            'is_winner': player_id in self.winners
-        } 
+            'is_winner': player_id in self.winners,
+            'is_current': player_id == self.current_player_index,  # 新增：是否当前玩家
+            'can_win': getattr(player, 'can_win', False),
+            'score': getattr(player, 'score', 0)
+        }
+        
+    def get_all_players_info(self) -> List[Dict[str, Any]]:
+        """获取所有玩家信息"""
+        return [self.get_player_info(i) for i in range(len(self.players))] 
