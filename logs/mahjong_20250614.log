@@ -1,0 +1,76 @@
+2025-06-14 16:07:56,288 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 16:07:56,288 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 16:07:56,288 - game_engine - INFO - 发牌完成
+2025-06-14 16:07:56,288 - game_engine - INFO - 训练师选择缺筒
+2025-06-14 16:07:56,289 - game_engine - INFO - AI-1选择缺条
+2025-06-14 16:07:56,289 - game_engine - INFO - AI-2选择缺万
+2025-06-14 16:07:56,289 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 16:09:45,508 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 16:09:45,538 - mahjong_game - INFO - 麻将游戏初始化完成
+2025-06-14 16:09:54,751 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 16:09:54,766 - game_engine - INFO - 发牌完成
+2025-06-14 16:09:54,766 - game_engine - INFO - 训练师选择缺筒
+2025-06-14 16:09:54,766 - game_engine - INFO - AI-1选择缺筒
+2025-06-14 16:09:54,766 - game_engine - INFO - AI-2选择缺万
+2025-06-14 16:09:54,767 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 16:11:30,227 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 16:11:30,227 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 16:11:30,227 - game_engine - INFO - 发牌完成
+2025-06-14 16:11:30,227 - game_engine - INFO - 训练师选择缺条
+2025-06-14 16:11:30,227 - game_engine - INFO - AI-1选择缺筒
+2025-06-14 16:11:30,227 - game_engine - INFO - AI-2选择缺筒
+2025-06-14 16:11:30,227 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 16:11:30,227 - game_engine - INFO - 玩家选择缺万
+2025-06-14 16:26:04,700 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 16:26:04,701 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 16:26:04,701 - game_engine - INFO - 发牌完成
+2025-06-14 16:26:04,701 - game_engine - INFO - 训练师选择缺万
+2025-06-14 16:26:04,701 - game_engine - INFO - AI-1选择缺筒
+2025-06-14 16:26:04,701 - game_engine - INFO - AI-2选择缺万
+2025-06-14 16:26:04,701 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 16:26:04,701 - game_engine - INFO - 玩家选择缺万
+2025-06-14 16:26:04,702 - game_engine - INFO - 玩家执行动作: discard
+2025-06-14 16:28:27,790 - game_engine - INFO - 训练师执行动作: discard
+2025-06-14 17:04:55,182 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 17:04:55,182 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 17:04:55,183 - game_engine - INFO - 发牌完成
+2025-06-14 17:04:55,183 - game_engine - INFO - 换三张阶段开始，方向: 逆时针
+2025-06-14 17:04:55,183 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 17:06:51,121 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 17:06:51,121 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 17:06:51,122 - game_engine - INFO - 发牌完成
+2025-06-14 17:06:51,122 - game_engine - INFO - 换三张阶段开始，方向: 顺时针
+2025-06-14 17:06:51,122 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 17:07:17,411 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 17:07:17,412 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 17:07:17,412 - game_engine - INFO - 发牌完成
+2025-06-14 17:07:17,412 - game_engine - INFO - 换三张阶段开始，方向: 逆时针
+2025-06-14 17:07:17,412 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 17:07:54,681 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 17:07:54,681 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 17:07:54,681 - game_engine - INFO - 发牌完成
+2025-06-14 17:07:54,681 - game_engine - INFO - 换三张阶段开始，方向: 顺时针
+2025-06-14 17:07:54,681 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 17:07:54,682 - game_engine - INFO - 玩家 0 提交换牌: ['2条', '2条', '2条']
+2025-06-14 17:07:54,682 - game_engine - INFO - 玩家 1 提交换牌: ['1条', '1条', '4条']
+2025-06-14 17:07:54,682 - game_engine - INFO - 玩家 2 提交换牌: ['4万', '4万', '5万']
+2025-06-14 17:07:54,682 - game_engine - INFO - 玩家 3 提交换牌: ['2条', '3条', '6条']
+2025-06-14 17:07:54,682 - game_engine - INFO - 执行换牌操作
+2025-06-14 17:07:54,683 - game_engine - INFO - 换牌完成
+2025-06-14 17:07:54,683 - game_engine - INFO - 开始选择缺一门
+2025-06-14 17:07:54,683 - game_engine - INFO - 玩家 0 选择缺 筒
+2025-06-14 17:07:54,683 - game_engine - INFO - 游戏阶段开始
+2025-06-14 17:09:11,007 - game_engine - INFO - 游戏引擎初始化完成
+2025-06-14 17:09:11,007 - game_engine - INFO - 游戏设置完成: training, sichuan
+2025-06-14 17:09:11,008 - game_engine - INFO - 发牌完成
+2025-06-14 17:09:11,008 - game_engine - INFO - 换三张阶段开始，方向: 顺时针
+2025-06-14 17:09:11,008 - game_engine - INFO - 新游戏开始，第1轮
+2025-06-14 17:09:11,008 - game_engine - INFO - 玩家 0 提交换牌: ['5筒', '5筒', '7筒']
+2025-06-14 17:09:11,008 - game_engine - INFO - 玩家 1 提交换牌: ['1筒', '2筒', '4筒']
+2025-06-14 17:09:11,008 - game_engine - INFO - 玩家 2 提交换牌: ['1条', '4条', '4条']
+2025-06-14 17:09:11,009 - game_engine - INFO - 玩家 3 提交换牌: ['4万', '5万', '5万']
+2025-06-14 17:09:11,009 - game_engine - INFO - 执行换牌操作
+2025-06-14 17:09:11,009 - game_engine - INFO - 换牌完成
+2025-06-14 17:09:11,009 - game_engine - INFO - 开始选择缺一门
+2025-06-14 17:09:11,009 - game_engine - INFO - 玩家 0 选择缺 筒
+2025-06-14 17:09:11,009 - game_engine - INFO - 游戏阶段开始
