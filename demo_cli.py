@@ -266,7 +266,7 @@ def simulate_ai_turn(engine):
         print(f"🎉 {current_player.name} 决定自摸胡牌!")
         success = engine.execute_player_action(current_player, GameAction.WIN)
         if success:
-            print(f"✅ {current_player.name} 成功胡牌!")
+            print(f"✅ {current_player.name} 自摸胡牌成功!")
             input("\n按回车键继续...")
             return True
         else:
@@ -367,7 +367,10 @@ def handle_ai_responses(engine, last_discarder=None):
 
     success = engine.execute_player_action(actor, action)
     if success:
-        print(f"✅ {actor.name} 成功执行 {action_name}!")
+        if action == GameAction.WIN:
+            print(f"✅ {actor.name} 点炮胡牌成功!")
+        else:
+            print(f"✅ {actor.name} 成功执行 {action_name}!")
         input("\n按回车键继续...") # 为AI响应动作添加暂停
         return True
     else:
@@ -444,6 +447,10 @@ def check_response_actions(engine):
             print(f"🔥 {human_player.name}选择{user_choice}!")
             success = engine.execute_player_action(human_player, action_to_execute)
             if success:
+                if user_choice == "胡":
+                    print(f"✅ {human_player.name} 点炮胡牌成功!")
+                else:
+                    print(f"✅ {human_player.name} 成功执行{user_choice}!")
                 input("\n按回车键继续...") # 为人类玩家响应动作添加暂停
                 return True
             else:
@@ -770,6 +777,17 @@ def main():
                 print(f"🏆 {winner.name} 胡牌获胜!")
         else:
             print("🤝 游戏流局，无人胜出!")
+    
+    # 显示得分详情
+    print("\n💰 本局得分:")
+    for player in engine.players:
+        score_change = getattr(player, 'last_score_change', 0)
+        if score_change > 0:
+            print(f"  {player.name}: +{score_change} 分 (总分: {player.score})")
+        elif score_change < 0:
+            print(f"  {player.name}: {score_change} 分 (总分: {player.score})")
+        else:
+            print(f"  {player.name}: 0 分 (总分: {player.score})")
     
     display_game_status(engine)
     display_player_info(engine)

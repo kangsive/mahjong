@@ -655,12 +655,15 @@ class GameEngine:
             player.is_winner = True
             self.state = GameState.GAME_OVER
             
+            # 判断是否为自摸胡牌
+            is_self_draw = self.last_discarded_tile is None
+            
             # 记录胜者信息
             winners = [player.position]
-            winner_tile = self.last_discarded_tile if self.last_discarded_tile else None
+            winner_tile = self.last_discarded_tile if self.last_discarded_tile else self.last_drawn_tile
             
-            # 检查是否有其他玩家也能胡这张牌（一炮多响）
-            if self.last_discarded_tile:
+            # 检查是否有其他玩家也能胡这张牌（一炮多响，只有点炮时才可能）
+            if self.last_discarded_tile and not is_self_draw:
                 for other_player in self.players:
                     if (other_player != player and 
                         other_player != self.last_discard_player and
@@ -671,16 +674,28 @@ class GameEngine:
             # 记录游戏结果用于下局决定庄家
             self._record_game_result(winners, winner_tile)
             
-            # 计算得分
-            scores = self.rule.calculate_score(player, self.players, self.last_discarded_tile)
+            # 计算得分，传递正确的自摸标志和放炮者信息
+            scores = self.rule.calculate_score(
+                player, self.players, winner_tile, 
+                is_self_draw=is_self_draw,
+                discard_player=self.last_discard_player
+            )
+            
             for p in self.players:
-                p.score += scores[p.name]
+                score_change = scores[p.name]
+                p.score += score_change
+                # 记录本局得分变化用于显示
+                p.last_score_change = score_change
                 if p.is_winner:
                     p.wins += 1
                 else:
                     p.losses += 1
             
-            self._notify_game_over(player, scores)
+            # 记录胡牌类型用于显示
+            win_type = "自摸" if is_self_draw else "点炮胡"
+            self.logger.info(f"{player.name} {win_type}胡牌！胡牌: {winner_tile}")
+            
+            self._notify_game_over(player, scores, is_self_draw, winner_tile)
             return True
         
         return False
@@ -796,10 +811,10 @@ class GameEngine:
         if self.on_player_action:
             self.on_player_action(player, action, data)
     
-    def _notify_game_over(self, winner: Player, scores: Dict):
+    def _notify_game_over(self, winner: Player, scores: Dict, is_self_draw: bool = False, winner_tile: Optional[Tile] = None):
         """通知游戏结束"""
         if self.on_game_over:
-            self.on_game_over(winner, scores)
+            self.on_game_over(winner, scores, is_self_draw, winner_tile)
     
     def is_game_over(self) -> bool:
         """游戏是否结束"""

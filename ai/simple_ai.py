@@ -321,18 +321,27 @@ class SimpleAI(BaseAI):
     
     def _is_close_to_win(self, player: Player) -> bool:
         """判断是否接近胡牌（听牌）"""
+        from game.tile import FengType, JianType
+        
         # 检查是否只差一张牌就能胡牌
-        for tile_type in [TileType.WAN, TileType.TONG, TileType.TIAO, TileType.FENG, TileType.JIAN]:
-            for value in range(1, 10):  # 1-9
-                if tile_type in [TileType.FENG, TileType.JIAN] and value > 7:
-                    continue  # 风牌和箭牌只有1-7
-                
-                # 创建测试牌
+        # 检查数字牌
+        for tile_type in [TileType.WAN, TileType.TONG, TileType.TIAO]:
+            for value in range(1, 10):
                 test_tile = Tile(tile_type, value)
-                
-                # 检查加上这张牌是否能胡牌
                 if self._can_actually_win(player, test_tile):
                     return True
+        
+        # 检查风牌
+        for feng_type in FengType:
+            test_tile = Tile(TileType.FENG, feng_type=feng_type)
+            if self._can_actually_win(player, test_tile):
+                return True
+        
+        # 检查箭牌
+        for jian_type in JianType:
+            test_tile = Tile(TileType.JIAN, jian_type=jian_type)
+            if self._can_actually_win(player, test_tile):
+                return True
         
         return False
     

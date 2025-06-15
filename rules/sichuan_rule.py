@@ -66,7 +66,7 @@ class SichuanRule(BaseRule):
             return True
         
         # 检查基本胡牌牌型（4个面子+1个对子）
-        return self.is_valid_hand(test_tiles)
+        return self._check_basic_win_pattern(test_tiles)
     
     def _check_missing_suit(self, player: Player) -> bool:
         """检查是否满足缺一门条件"""
@@ -92,9 +92,113 @@ class SichuanRule(BaseRule):
         has_missing_suit = any(tile.tile_type == missing_suit_type for tile in all_tiles)
         return not has_missing_suit
     
+    def _check_basic_win_pattern(self, tiles: List[Tile]) -> bool:
+        """检查基本胡牌牌型（4个面子+1个对子）"""
+        # 统计每种牌的数量
+        tile_counts = {}
+        for tile in tiles:
+            key = self._tile_to_key(tile)
+            tile_counts[key] = tile_counts.get(key, 0) + 1
+        
+        return self._try_form_melds(tile_counts, 0, False)
+    
+    def _tile_to_key(self, tile: Tile) -> tuple:
+        """将牌转换为可比较的键"""
+        return (tile.tile_type, tile.value)
+    
+    def _try_form_melds(self, tile_counts: Dict[tuple, int], melds_formed: int, has_pair: bool) -> bool:
+        """尝试组成面子"""
+        # 如果已经组成了4个面子和1个对子
+        if melds_formed == 4 and has_pair:
+            return all(count == 0 for count in tile_counts.values())
+        
+        # 如果牌已经用完但还没形成完整的胡牌牌型
+        if all(count == 0 for count in tile_counts.values()):
+            return False
+        
+        # 找到第一个还有牌的类型
+        tile_key = None
+        for key, count in tile_counts.items():
+            if count > 0:
+                tile_key = key
+                break
+        
+        if tile_key is None:
+            return False
+        
+        count = tile_counts[tile_key]
+        
+        # 尝试组成对子（如果还没有对子）
+        if not has_pair and count >= 2:
+            tile_counts[tile_key] -= 2
+            if self._try_form_melds(tile_counts, melds_formed, True):
+                tile_counts[tile_key] += 2
+                return True
+            tile_counts[tile_key] += 2
+        
+        # 尝试组成刻子
+        if count >= 3:
+            tile_counts[tile_key] -= 3
+            if self._try_form_melds(tile_counts, melds_formed + 1, has_pair):
+                tile_counts[tile_key] += 3
+                return True
+            tile_counts[tile_key] += 3
+        
+        # 尝试组成顺子（只对数字牌）
+        if self._is_number_tile_key(tile_key):
+            if self._try_form_sequence(tile_counts, tile_key):
+                if self._try_form_melds(tile_counts, melds_formed + 1, has_pair):
+                    self._restore_sequence(tile_counts, tile_key)
+                    return True
+                self._restore_sequence(tile_counts, tile_key)
+        
+        return False
+    
+    def _is_number_tile_key(self, tile_key: tuple) -> bool:
+        """检查是否为数字牌键"""
+        tile_type, value = tile_key
+        return tile_type in [TileType.WAN, TileType.TONG, TileType.TIAO]
+    
+    def _try_form_sequence(self, tile_counts: Dict[tuple, int], tile_key: tuple) -> bool:
+        """尝试组成顺子"""
+        tile_type, value = tile_key
+        
+        if not self._is_number_tile_key(tile_key):
+            return False
+        
+        # 检查是否可以组成顺子
+        if value <= 7:  # 可以作为顺子的开头
+            key1 = (tile_type, value)
+            key2 = (tile_type, value + 1)
+            key3 = (tile_type, value + 2)
+            
+            if (tile_counts.get(key1, 0) >= 1 and 
+                tile_counts.get(key2, 0) >= 1 and 
+                tile_counts.get(key3, 0) >= 1):
+                
+                tile_counts[key1] -= 1
+                tile_counts[key2] -= 1
+                tile_counts[key3] -= 1
+                return True
+        
+        return False
+    
+    def _restore_sequence(self, tile_counts: Dict[tuple, int], tile_key: tuple):
+        """恢复顺子"""
+        tile_type, value = tile_key
+        
+        key1 = (tile_type, value)
+        key2 = (tile_type, value + 1)
+        key3 = (tile_type, value + 2)
+        
+        tile_counts[key1] += 1
+        tile_counts[key2] += 1
+        tile_counts[key3] += 1
+    
     def calculate_score(self, winner: Player, players: List[Player], 
                        win_tile: Optional[Tile] = None, 
-                       is_self_draw: bool = False) -> Dict[str, int]:
+                       is_self_draw: bool = False,
+                       discard_player: Optional[Player] = None) -> Dict[str, int]:
         """计算得分"""
         scores = {player.name: 0 for player in players}
         
@@ -113,13 +217,15 @@ class SichuanRule(BaseRule):
             scores[winner.name] = base_score * len(other_players)
         else:
             # 点炮：放炮者付钱
-            # 这里需要额外的逻辑来确定放炮者
-            # 暂时简化为第一个非赢家承担
-            other_players = [p for p in players if p != winner]
-            if other_players:
-                pao_player = other_players[0]  # 简化处理
-                scores[pao_player.name] = -base_score
+            if discard_player and discard_player != winner:
+                scores[discard_player.name] = -base_score
                 scores[winner.name] = base_score
+            else:
+                # 如果没有明确的放炮者，按自摸处理（保险起见）
+                other_players = [p for p in players if p != winner]
+                for player in other_players:
+                    scores[player.name] = -base_score
+                scores[winner.name] = base_score * len(other_players)
         
         return scores
     
