@@ -82,6 +82,12 @@ class GameEngine:
         self.winners: List[int] = []  # 已胡牌的玩家索引
         self.active_players: List[int] = []  # 仍在游戏中的玩家索引
         
+        # 庄家管理
+        self.dealer_index = 0  # 当前庄家索引
+        self.last_game_winners: List[int] = []  # 上局胜者列表
+        self.last_game_winner_tile: Optional[Tile] = None  # 上局胡牌的牌
+        self.is_first_game = True  # 是否为第一局游戏
+        
         self.logger.info("游戏引擎初始化完成")
     
     def setup_game(self, mode: GameMode, rule_type: str = "sichuan"):
@@ -131,9 +137,11 @@ class GameEngine:
         
         # 重置游戏状态
         self.round_number += 1
-        self.current_player_index = 0
         self.last_discarded_tile = None
         self.last_discard_player = None
+        
+        # 决定庄家
+        self._determine_dealer()
         
         # 重置玩家
         for player in self.players:
@@ -176,12 +184,12 @@ class GameEngine:
             player.add_tiles(tiles)
         
         # 庄家多摸一张
-        dealer = self.players[0]  # 第一个玩家是庄家
+        dealer = self.get_dealer()
         extra_tile = self.deck.draw_tile()
         if extra_tile:
             dealer.add_tile(extra_tile)
         
-        self.logger.info("发牌完成")
+        self.logger.info(f"发牌完成，庄家 {dealer.name} 获得14张牌")
     
     def _start_tile_exchange(self):
         """开始换三张阶段"""
@@ -290,6 +298,9 @@ class GameEngine:
                 if player.remove_tile_from_hand(tile):
                     removed_tiles[player_id].append(tile)
         
+        # 记录每个玩家获得的牌
+        self.received_tiles = {}  # 新增：记录每个玩家获得的牌
+        
         # 按方向分发牌
         for player_id in range(4):
             if player_id in removed_tiles:
@@ -297,9 +308,14 @@ class GameEngine:
                 target_player_id = (player_id + self.exchange_direction) % 4
                 target_player = self.players[target_player_id]
                 
+                # 记录目标玩家获得的牌
+                if target_player_id not in self.received_tiles:
+                    self.received_tiles[target_player_id] = []
+                
                 # 将牌给目标玩家
                 for tile in removed_tiles[player_id]:
                     target_player.add_tile_to_hand(tile)
+                    self.received_tiles[target_player_id].append(tile)
         
         # 重新排序手牌
         for player in self.players:
@@ -379,7 +395,7 @@ class GameEngine:
     def _start_playing(self):
         """开始游戏阶段"""
         self.state = GameState.PLAYING
-        self.current_player_index = 0  # 庄家先开始
+        self.current_player_index = self.dealer_index  # 庄家先开始
         
         # 清空出牌池
         self.discard_pool = []
@@ -639,6 +655,22 @@ class GameEngine:
             player.is_winner = True
             self.state = GameState.GAME_OVER
             
+            # 记录胜者信息
+            winners = [player.position]
+            winner_tile = self.last_discarded_tile if self.last_discarded_tile else None
+            
+            # 检查是否有其他玩家也能胡这张牌（一炮多响）
+            if self.last_discarded_tile:
+                for other_player in self.players:
+                    if (other_player != player and 
+                        other_player != self.last_discard_player and
+                        self.rule.can_win(other_player, self.last_discarded_tile)):
+                        other_player.is_winner = True
+                        winners.append(other_player.position)
+            
+            # 记录游戏结果用于下局决定庄家
+            self._record_game_result(winners, winner_tile)
+            
             # 计算得分
             scores = self.rule.calculate_score(player, self.players, self.last_discarded_tile)
             for p in self.players:
@@ -714,6 +746,9 @@ class GameEngine:
         self.state = GameState.GAME_OVER
         self.logger.info("游戏流局，无人胜出")
         
+        # 记录流局结果（无胜者）
+        self._record_game_result([])
+        
         # 流局时所有玩家得分为0
         scores = {player.name: 0 for player in self.players}
         
@@ -775,6 +810,8 @@ class GameEngine:
         return {
             'state': self.state.value,
             'current_player': self.current_player_index,
+            'dealer_index': self.dealer_index,  # 新增：庄家索引
+            'dealer_name': self.get_dealer().name,  # 新增：庄家姓名
             'active_players': self.active_players,
             'winners': self.winners,
             'round_number': self.round_number,
@@ -783,7 +820,9 @@ class GameEngine:
             'exchange_direction': self.exchange_direction if hasattr(self, 'exchange_direction') else None,
             'discard_pool': self.discard_pool,  # 新增：出牌池
             'last_discarded_tile': str(self.last_discarded_tile) if self.last_discarded_tile else None,
-            'last_discard_player': self.last_discard_player.name if self.last_discard_player else None
+            'last_discard_player': self.last_discard_player.name if self.last_discard_player else None,
+            'is_first_game': self.is_first_game,  # 新增：是否第一局
+            'received_tiles': self.received_tiles if hasattr(self, 'received_tiles') else None
         }
     
     def get_player_info(self, player_id: int) -> Optional[Dict[str, Any]]:
@@ -807,10 +846,59 @@ class GameEngine:
             'is_active': player_id in self.active_players,
             'is_winner': player_id in self.winners,
             'is_current': player_id == self.current_player_index,  # 新增：是否当前玩家
+            'is_dealer': player_id == self.dealer_index,  # 新增：是否庄家
             'can_win': getattr(player, 'can_win', False),
             'score': getattr(player, 'score', 0)
         }
         
     def get_all_players_info(self) -> List[Dict[str, Any]]:
         """获取所有玩家信息"""
-        return [self.get_player_info(i) for i in range(len(self.players))] 
+        return [self.get_player_info(i) for i in range(len(self.players))]
+    
+    def _determine_dealer(self):
+        """
+        决定庄家
+        规则：
+        1. 第一局游戏：随机分配庄家
+        2. 一炮多响（多人同时胡一张玩家打出来的牌）：优先坐庄
+        3. 否则第一个胡牌的玩家为庄家
+        """
+        if self.is_first_game:
+            # 第一局游戏，随机分配庄家
+            self.dealer_index = random.randint(0, len(self.players) - 1)
+            self.logger.info(f"第一局游戏，随机分配庄家: {self.players[self.dealer_index].name}")
+        else:
+            # 根据上局结果决定庄家
+            if len(self.last_game_winners) > 1 and self.last_game_winner_tile:
+                # 一炮多响情况：多人同时胡同一张牌
+                # 按座位顺序，选择第一个胡牌的玩家为庄家
+                self.dealer_index = min(self.last_game_winners)
+                self.logger.info(f"一炮多响，{self.players[self.dealer_index].name} 优先坐庄")
+            elif self.last_game_winners:
+                # 单人胡牌，胡牌者为庄家
+                self.dealer_index = self.last_game_winners[0]
+                self.logger.info(f"上局胜者 {self.players[self.dealer_index].name} 坐庄")
+            else:
+                # 流局或其他情况，庄家不变
+                self.logger.info(f"流局，庄家不变: {self.players[self.dealer_index].name}")
+        
+        # 设置当前玩家为庄家
+        self.current_player_index = self.dealer_index
+    
+    def _record_game_result(self, winners: List[int], winner_tile: Optional[Tile] = None):
+        """
+        记录游戏结果，用于下局决定庄家
+        
+        Args:
+            winners: 胜者列表
+            winner_tile: 胡牌的牌（如果是点炮胡牌）
+        """
+        self.last_game_winners = winners.copy()
+        self.last_game_winner_tile = winner_tile
+        self.is_first_game = False
+        
+        self.logger.info(f"记录游戏结果: 胜者 {[self.players[i].name for i in winners]}, 胡牌: {winner_tile}")
+    
+    def get_dealer(self) -> Player:
+        """获取当前庄家"""
+        return self.players[self.dealer_index] 

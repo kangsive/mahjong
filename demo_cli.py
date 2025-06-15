@@ -13,10 +13,12 @@ import time
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from game.game_engine import GameEngine, GameMode, GameAction
-from game.player import PlayerType
+from game.player import PlayerType, Player
+from game.tile import Tile
 from ai.trainer_ai import TrainerAI
 from rules.sichuan_rule import SichuanRule
 import random
+from typing import List, Optional
 
 def display_game_status(engine):
     """显示游戏状态"""
@@ -191,7 +193,7 @@ def simulate_ai_turn(engine):
         else:
             print(f"❌ {current_player.name} 尝试自摸失败，继续出牌。")
 
-    # 2. 选择打牌
+    # 2. 智能选择打牌
     available_tiles = [t for t in current_player.hand_tiles 
                       if engine.rule.can_discard(current_player, t)]
     
@@ -199,7 +201,8 @@ def simulate_ai_turn(engine):
         print(f"⚠️ {current_player.name} 无牌可打，游戏可能卡住。")
         return False # 发出错误信号
 
-    tile_to_discard = random.choice(available_tiles)
+    # 使用AI算法选择最优出牌
+    tile_to_discard = choose_best_discard_ai(current_player, available_tiles, engine)
     print(f"{current_player.name}打出: {tile_to_discard}")
     
     success = engine.execute_player_action(current_player, GameAction.DISCARD, tile_to_discard)
@@ -213,6 +216,21 @@ def simulate_ai_turn(engine):
         print("   这通常是游戏引擎或规则的内部错误。")
         return False # 发出错误信号
 
+def choose_best_discard_ai(player: Player, available_tiles: List[Tile], engine) -> Tile:
+    """AI智能选择最优出牌"""
+    from ai.simple_ai import SimpleAI
+    from ai.trainer_ai import TrainerAI
+    
+    # 根据玩家类型选择AI
+    if player.player_type == PlayerType.AI_TRAINER:
+        ai = TrainerAI()
+    else:
+        difficulty = "hard" if player.player_type == PlayerType.AI_HARD else "medium"
+        ai = SimpleAI(difficulty)
+    
+    # 使用AI算法选择出牌
+    return ai.choose_discard(player, available_tiles)
+
 def handle_ai_responses(engine, last_discarder=None):
     """检查并执行AI对出牌的响应动作"""
     if not engine.last_discarded_tile:
@@ -224,12 +242,21 @@ def handle_ai_responses(engine, last_discarder=None):
         if player == last_discarder or player.player_type == PlayerType.HUMAN or getattr(player, 'has_won', False):
             continue
 
+        # 使用AI算法决定是否执行动作
+        available_actions = []
         if engine.can_player_action(player, GameAction.WIN):
-            actions.append({'player': player, 'action': GameAction.WIN, 'priority': 3})
+            available_actions.append(GameAction.WIN)
         if engine.can_player_action(player, GameAction.GANG):
-            actions.append({'player': player, 'action': GameAction.GANG, 'priority': 2})
+            available_actions.append(GameAction.GANG)
         if engine.can_player_action(player, GameAction.PENG):
-            actions.append({'player': player, 'action': GameAction.PENG, 'priority': 1})
+            available_actions.append(GameAction.PENG)
+        
+        if available_actions:
+            # 使用AI决策
+            chosen_action = choose_best_action_ai(player, available_actions, engine)
+            if chosen_action and chosen_action != GameAction.PASS:
+                priority = 3 if chosen_action == GameAction.WIN else (2 if chosen_action == GameAction.GANG else 1)
+                actions.append({'player': player, 'action': chosen_action, 'priority': priority})
     
     if not actions:
         return False
@@ -264,6 +291,28 @@ def handle_ai_responses(engine, last_discarder=None):
     else:
         print(f"❌ {actor.name} 执行 {action_name} 失败。")
         return False
+
+def choose_best_action_ai(player: Player, available_actions: List[GameAction], engine) -> Optional[GameAction]:
+    """AI智能选择最优响应动作"""
+    from ai.simple_ai import SimpleAI
+    from ai.trainer_ai import TrainerAI
+    
+    # 根据玩家类型选择AI
+    if player.player_type == PlayerType.AI_TRAINER:
+        ai = TrainerAI()
+    else:
+        difficulty = "hard" if player.player_type == PlayerType.AI_HARD else "medium"
+        ai = SimpleAI(difficulty)
+    
+    # 构建上下文
+    context = {
+        "last_discarded_tile": engine.last_discarded_tile,
+        "discard_pool": engine.discard_pool,
+        "remaining_tiles": engine.deck.get_remaining_count() if engine.deck else 0
+    }
+    
+    # 使用AI算法决定动作
+    return ai.decide_action(player, available_actions, context)
 
 def check_response_actions(engine):
     """检查并执行响应动作，获取用户输入"""
@@ -319,6 +368,121 @@ def check_response_actions(engine):
         else:
             print("无效的选择，请重新输入。")
 
+def handle_tile_exchange(engine):
+    """处理换三张阶段的人类玩家交互"""
+    human_player = engine.get_human_player()
+    if not human_player:
+        return
+    
+    print(f"\n🔄 换三张阶段开始！")
+    print(f"交换方向: {'顺时针' if engine.exchange_direction == 1 else '逆时针'}")
+    print("你需要选择三张同花色的牌进行交换")
+    
+    # 显示当前手牌
+    display_human_hand(engine)
+    
+    # 按花色分组显示
+    suits = {}
+    for tile in human_player.hand_tiles:
+        if tile.tile_type not in suits:
+            suits[tile.tile_type] = []
+        suits[tile.tile_type].append(tile)
+    
+    print("\n📊 按花色分组:")
+    suit_names = {"万": "WAN", "筒": "TONG", "条": "TIAO", "风": "FENG", "箭": "JIAN"}
+    for suit_type, tiles in suits.items():
+        suit_name = suit_type.value
+        print(f"  {suit_name}: {[str(t) for t in tiles]} ({len(tiles)}张)")
+    
+    # 获取AI训练师建议
+    if engine.mode == GameMode.TRAINING:
+        trainer = TrainerAI()
+        advice = trainer.provide_exchange_advice(human_player)
+        print(f"\n🎓 AI训练师建议:")
+        print(advice)
+    
+    # 让玩家选择要换的三张牌
+    selected_tiles = []
+    while len(selected_tiles) != 3:
+        print(f"\n请输入要换的三张牌的序号（用空格分隔，如: 1 3 5）:")
+        print("注意：必须选择同花色的三张牌")
+        
+        try:
+            choice_str = input(f"请输入三个序号 (1-{len(human_player.hand_tiles)}), 或输入 'r' 重新选择: ")
+            
+            if choice_str.lower() == 'r':
+                selected_tiles = []
+                print("已重新开始选择")
+                continue
+            
+            # 解析输入的序号
+            choice_parts = choice_str.strip().split()
+            if len(choice_parts) != 3:
+                print("❌ 请输入恰好三个序号，用空格分隔")
+                continue
+            
+            # 转换为整数并验证
+            choice_indices = []
+            for part in choice_parts:
+                try:
+                    idx = int(part) - 1
+                    if 0 <= idx < len(human_player.hand_tiles):
+                        choice_indices.append(idx)
+                    else:
+                        print(f"❌ 序号 {part} 无效，请输入1到{len(human_player.hand_tiles)}之间的数字")
+                        break
+                except ValueError:
+                    print(f"❌ '{part}' 不是有效的数字")
+                    break
+            else:
+                # 检查是否有重复的序号
+                if len(set(choice_indices)) != 3:
+                    print("❌ 不能选择重复的牌，请输入三个不同的序号")
+                    continue
+                
+                # 获取对应的牌
+                candidate_tiles = [human_player.hand_tiles[idx] for idx in choice_indices]
+                
+                # 检查是否为同花色
+                first_suit = candidate_tiles[0].tile_type
+                if not all(tile.tile_type == first_suit for tile in candidate_tiles):
+                    print(f"❌ 必须选择同花色的牌！你选择的牌包含不同花色:")
+                    for i, tile in enumerate(candidate_tiles):
+                        print(f"  序号{choice_parts[i]}: {tile} ({tile.tile_type.value})")
+                    continue
+                
+                # 选择成功
+                selected_tiles = candidate_tiles
+                print(f"✅ 已选择三张{first_suit.value}:")
+                for i, tile in enumerate(selected_tiles):
+                    print(f"  序号{choice_parts[i]}: {tile}")
+                break
+                
+        except Exception as e:
+            print(f"❌ 发生错误: {e}")
+    
+    # 确认选择
+    print(f"\n✅ 你选择了以下三张牌进行交换:")
+    for i, tile in enumerate(selected_tiles, 1):
+        print(f"  {i}. {tile}")
+    
+    while True:
+        confirm = input("确认交换这三张牌吗？(y/n): ").strip().lower()
+        if confirm in ['y', 'yes', '是', '确认']:
+            # 提交换牌选择
+            success = engine.submit_exchange_tiles(human_player.player_id, selected_tiles)
+            if success:
+                print("✅ 换牌选择已提交，等待其他玩家...")
+                return True
+            else:
+                print("❌ 换牌提交失败")
+                return False
+        elif confirm in ['n', 'no', '否', '取消']:
+            print("取消选择，重新开始...")
+            return handle_tile_exchange(engine)  # 重新开始选择
+        else:
+            print("请输入 y 或 n")
+
 def main():
     """主演示函数"""
     print("🀄 麻将游戏命令行演示 (血战到底版)")
@@ -338,21 +502,83 @@ def main():
     
     print("✅ 游戏开始!")
     
-    # 玩家定缺前，先展示手牌
-    human_player = engine.get_human_player()
-    if human_player and not human_player.missing_suit:
+    # 处理换三张阶段
+    if engine.state.value == 'tile_exchange':
+        print("\n" + "="*60)
+        print("🔄 换三张阶段")
+        print("="*60)
+        
+        # 显示游戏状态
+        display_game_status(engine)
+        display_player_info(engine)
+        
+        # 记录换牌前的手牌（用于对比）
+        human_player = engine.get_human_player()
+        original_hand = human_player.hand_tiles.copy() if human_player else []
+        
+        # 人类玩家选择换牌
+        if not handle_tile_exchange(engine):
+            print("❌ 换牌失败，游戏结束")
+            return
+        
+        # 等待换牌完成
+        while engine.state.value == 'tile_exchange':
+            print("⏳ 等待AI玩家完成换牌...")
+            import time
+            time.sleep(1)
+            # AI玩家应该已经自动完成了换牌，这里只是为了确保状态转换
+            break
+        
+        # 显示换牌结果
+        if human_player and hasattr(engine, 'received_tiles') and engine.received_tiles:
+            received = engine.received_tiles.get(human_player.player_id, [])
+            if received:
+                print(f"\n🎁 换牌完成！你获得的三张牌:")
+                for i, tile in enumerate(received, 1):
+                    print(f"  {i}. {tile}")
+                print(f"💡 这些牌来自{'上家' if engine.exchange_direction == -1 else '下家'}玩家")
+    
+    # 处理选择缺门阶段
+    if engine.state.value == 'missing_suit_selection':
+        print("\n" + "="*60)
+        print("🎲 选择缺门阶段")
+        print("="*60)
+        
+        # 显示换牌后的状态
         display_game_status(engine)
         display_player_info(engine)
         display_human_hand(engine)
 
         # 交互式选择缺门
-        while not human_player.missing_suit:
-            suit_choice = input(f"🎯 {human_player.name}, 请选择缺门 (万, 筒, 条): ").strip()
-            if suit_choice in ["万", "筒", "条"]:
-                engine.set_player_missing_suit(human_player, suit_choice)
-                print(f"你选择了缺: {suit_choice}")
-            else:
-                print("无效的选择，请输入 '万', '筒', 或 '条'.")
+        human_player = engine.get_human_player()
+        if human_player:
+            # 显示各花色统计
+            suit_counts = {"万": 0, "筒": 0, "条": 0}
+            for tile in human_player.hand_tiles:
+                tile_str = str(tile)
+                if len(tile_str) >= 2:
+                    suit_char = tile_str[-1]
+                    if suit_char in suit_counts:
+                        suit_counts[suit_char] += 1
+            
+            print(f"\n📊 你的手牌花色统计:")
+            for suit, count in suit_counts.items():
+                print(f"  {suit}: {count}张")
+            
+            # 获取AI训练师建议
+            if engine.mode == GameMode.TRAINING:
+                trainer = TrainerAI()
+                advice = trainer.provide_missing_suit_advice(human_player)
+                print(f"\n🎓 AI训练师建议:")
+                print(advice)
+            
+            while not human_player.missing_suit:
+                suit_choice = input(f"🎯 {human_player.name}, 请选择缺门 (万, 筒, 条): ").strip()
+                if suit_choice in ["万", "筒", "条"]:
+                    engine.set_player_missing_suit(human_player, suit_choice)
+                    print(f"你选择了缺: {suit_choice}")
+                else:
+                    print("无效的选择，请输入 '万', '筒', 或 '条'.")
 
     # 为AI玩家自动选择缺门 (四川麻将规则)
     if isinstance(engine.rule, SichuanRule):
@@ -373,7 +599,12 @@ def main():
                 print(f"🎯 {player.name}自动选择缺{missing_suit}")
 
     # 通知引擎定缺完成，开始打牌阶段
-    engine._start_playing()
+    if engine.state.value != 'playing':
+        engine._start_playing()
+    
+    print("\n" + "="*60)
+    print("🎮 开始打牌阶段")
+    print("="*60)
     
     last_discarder = None
     

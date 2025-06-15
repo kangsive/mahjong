@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Tuple
 import random
 
 from .base_ai import BaseAI
-from game.tile import Tile
+from game.tile import Tile, TileType
 from game.player import Player
 from game.game_engine import GameAction
 
@@ -69,6 +69,300 @@ class TrainerAI(BaseAI):
         # 选择牌数最少的花色作为缺门
         return min(suit_counts, key=suit_counts.get)
     
+    def provide_exchange_advice(self, player: Player) -> str:
+        """提供换三张的专业建议"""
+        advice = []
+        advice.append("🔄 换三张策略分析：")
+        
+        # 按花色分组统计
+        suits = {}
+        for tile in player.hand_tiles:
+            if tile.tile_type not in suits:
+                suits[tile.tile_type] = []
+            suits[tile.tile_type].append(tile)
+        
+        # 分析各花色情况
+        suit_analysis = {}
+        for suit_type, tiles in suits.items():
+            if suit_type in [TileType.WAN, TileType.TONG, TileType.TIAO]:
+                analysis = self._analyze_suit_for_exchange(tiles)
+                suit_analysis[suit_type.value] = {
+                    'tiles': tiles,
+                    'count': len(tiles),
+                    'analysis': analysis
+                }
+        
+        # 显示各花色分析
+        for suit_name, data in suit_analysis.items():
+            advice.append(f"\n📊 {suit_name}牌分析 ({data['count']}张):")
+            advice.append(f"   牌型: {[str(t) for t in data['tiles']]}")
+            advice.append(f"   评估: {data['analysis']['description']}")
+            advice.append(f"   建议: {data['analysis']['recommendation']}")
+        
+        # 给出最终建议
+        best_exchange = self._recommend_best_exchange(suit_analysis)
+        advice.append(f"\n🎯 最佳换牌建议:")
+        advice.append(f"   推荐换出: {best_exchange['suit']}牌")
+        advice.append(f"   具体牌张: {[str(t) for t in best_exchange['tiles']]}")
+        advice.append(f"   理由: {best_exchange['reason']}")
+        
+        return "\n".join(advice)
+    
+    def _analyze_suit_for_exchange(self, tiles: List[Tile]) -> Dict:
+        """分析单个花色的换牌价值"""
+        if not tiles:
+            return {"description": "无此花色", "recommendation": "无法换出（无牌）", "priority": -1000}
+        
+        count = len(tiles)
+        
+        # 如果不够三张牌，直接返回无法换出
+        if count < 3:
+            return {
+                "description": f"数量不足（仅{count}张）",
+                "recommendation": "无法换出（不够三张）",
+                "priority": -1000,  # 设置极低优先级
+                "pairs": 0,
+                "sequences": 0,
+                "isolated": count
+            }
+        
+        values = sorted([t.value for t in tiles])
+        
+        # 分析牌型特征
+        pairs = self._count_pairs_in_suit(values)
+        sequences = self._count_potential_sequences_in_suit(values)
+        isolated = self._count_isolated_tiles(values)
+        
+        description_parts = []
+        priority = 0
+        
+        if pairs > 0:
+            description_parts.append(f"{pairs}个对子")
+            priority -= pairs * 20  # 对子价值高，不建议换出
+        
+        if sequences > 0:
+            description_parts.append(f"{sequences}个潜在顺子")
+            priority -= sequences * 15  # 顺子价值中等
+        
+        if isolated > 0:
+            description_parts.append(f"{isolated}张孤张")
+            priority += isolated * 10  # 孤张适合换出
+        
+        # 数量因素
+        if count >= 6:
+            description_parts.append("数量过多")
+            priority += 15
+        elif count <= 4:
+            description_parts.append("数量适中")
+        
+        description = "、".join(description_parts) if description_parts else "普通牌型"
+        
+        # 生成建议（只对够三张牌的花色给建议）
+        if priority > 20:
+            recommendation = "强烈建议换出"
+        elif priority > 0:
+            recommendation = "可以考虑换出"
+        elif priority > -10:
+            recommendation = "中性选择"
+        else:
+            recommendation = "不建议换出"
+        
+        return {
+            "description": description,
+            "recommendation": recommendation,
+            "priority": priority,
+            "pairs": pairs,
+            "sequences": sequences,
+            "isolated": isolated
+        }
+    
+    def _count_pairs_in_suit(self, values: List[int]) -> int:
+        """统计对子数量"""
+        pairs = 0
+        i = 0
+        while i < len(values) - 1:
+            if values[i] == values[i + 1]:
+                pairs += 1
+                i += 2  # 跳过这一对
+            else:
+                i += 1
+        return pairs
+    
+    def _count_potential_sequences_in_suit(self, values: List[int]) -> int:
+        """统计潜在顺子数量（用于换牌分析）"""
+        unique_values = list(set(values))
+        unique_values.sort()
+        
+        sequences = 0
+        i = 0
+        while i < len(unique_values) - 2:
+            if (unique_values[i + 1] == unique_values[i] + 1 and 
+                unique_values[i + 2] == unique_values[i] + 2):
+                sequences += 1
+                i += 3
+            else:
+                i += 1
+        return sequences
+    
+    def _count_isolated_tiles(self, values: List[int]) -> int:
+        """统计孤张数量"""
+        isolated = 0
+        for value in set(values):
+            # 检查是否为孤张（前后都没有相邻的牌）
+            has_neighbor = False
+            for other_value in values:
+                if other_value != value and abs(other_value - value) <= 1:
+                    has_neighbor = True
+                    break
+            if not has_neighbor:
+                isolated += values.count(value)
+        return isolated
+    
+    def _recommend_best_exchange(self, suit_analysis: Dict) -> Dict:
+        """推荐最佳换牌方案"""
+        if not suit_analysis:
+            return {"suit": "无", "tiles": [], "reason": "无可换牌"}
+        
+        # 过滤出有足够三张牌的花色
+        valid_suits = {k: v for k, v in suit_analysis.items() if v['count'] >= 3}
+        
+        if not valid_suits:
+            # 如果没有任何花色有三张牌，返回错误信息
+            return {"suit": "无", "tiles": [], "reason": "没有花色有足够的三张牌进行交换"}
+        
+        # 按优先级排序
+        sorted_suits = sorted(valid_suits.items(), 
+                            key=lambda x: x[1]['analysis']['priority'], 
+                            reverse=True)
+        
+        best_suit_name, best_data = sorted_suits[0]
+        tiles = best_data['tiles'][:3]  # 取前三张
+        
+        reasons = []
+        analysis = best_data['analysis']
+        
+        if analysis['isolated'] > 0:
+            reasons.append(f"有{analysis['isolated']}张孤张牌")
+        if best_data['count'] >= 6:
+            reasons.append("该花色牌张过多")
+        if analysis['pairs'] == 0 and analysis['sequences'] == 0:
+            reasons.append("缺乏有效组合")
+        
+        reason = "、".join(reasons) if reasons else "综合考虑最优选择"
+        
+        return {
+            "suit": best_suit_name,
+            "tiles": tiles,
+            "reason": reason
+        }
+    
+    def provide_missing_suit_advice(self, player: Player) -> str:
+        """提供选择缺门的专业建议"""
+        advice = []
+        advice.append("🎲 选择缺门策略分析：")
+        
+        # 统计各花色情况
+        suit_counts = {"万": 0, "筒": 0, "条": 0}
+        suit_tiles = {"万": [], "筒": [], "条": []}
+        
+        for tile in player.hand_tiles:
+            if tile.is_number_tile():
+                suit_name = tile.tile_type.value
+                suit_counts[suit_name] += 1
+                suit_tiles[suit_name].append(tile)
+        
+        # 分析各花色的缺门价值
+        suit_analysis = {}
+        for suit_name in ["万", "筒", "条"]:
+            analysis = self._analyze_missing_suit_value(suit_tiles[suit_name])
+            suit_analysis[suit_name] = {
+                'count': suit_counts[suit_name],
+                'tiles': suit_tiles[suit_name],
+                'analysis': analysis
+            }
+        
+        # 显示分析结果
+        for suit_name, data in suit_analysis.items():
+            advice.append(f"\n📊 {suit_name}牌分析 ({data['count']}张):")
+            if data['tiles']:
+                advice.append(f"   牌张: {[str(t) for t in data['tiles']]}")
+            advice.append(f"   缺门价值: {data['analysis']['description']}")
+            advice.append(f"   缺门成本: {data['analysis']['cost_description']}")
+        
+        # 推荐最佳缺门
+        best_missing = self._recommend_best_missing_suit(suit_analysis)
+        advice.append(f"\n🎯 最佳缺门建议:")
+        advice.append(f"   推荐缺: {best_missing['suit']}")
+        advice.append(f"   理由: {best_missing['reason']}")
+        
+        return "\n".join(advice)
+    
+    def _analyze_missing_suit_value(self, tiles: List[Tile]) -> Dict:
+        """分析缺门的价值"""
+        if not tiles:
+            return {
+                "description": "完美选择",
+                "cost_description": "无损失",
+                "priority": 100
+            }
+        
+        count = len(tiles)
+        values = sorted([t.value for t in tiles])
+        
+        # 计算损失
+        pairs = self._count_pairs_in_suit(values)
+        sequences = self._count_potential_sequences_in_suit(values)
+        
+        cost = count * 5 + pairs * 20 + sequences * 15
+        priority = 100 - cost
+        
+        # 生成描述
+        if count == 0:
+            description = "完美选择"
+            cost_description = "无任何损失"
+        elif count <= 2:
+            description = "优秀选择"
+            cost_description = f"仅损失{count}张牌"
+        elif count <= 4:
+            description = "可接受选择"
+            cost_description = f"损失{count}张牌"
+        else:
+            description = "代价较高"
+            cost_description = f"损失{count}张牌，包括{pairs}个对子和{sequences}个潜在顺子"
+        
+        return {
+            "description": description,
+            "cost_description": cost_description,
+            "priority": priority,
+            "cost": cost
+        }
+    
+    def _recommend_best_missing_suit(self, suit_analysis: Dict) -> Dict:
+        """推荐最佳缺门"""
+        # 按优先级排序（优先级越高越好）
+        sorted_suits = sorted(suit_analysis.items(),
+                            key=lambda x: x[1]['analysis']['priority'],
+                            reverse=True)
+        
+        best_suit_name, best_data = sorted_suits[0]
+        
+        reasons = []
+        if best_data['count'] == 0:
+            reasons.append("你没有这个花色的牌")
+        elif best_data['count'] <= 2:
+            reasons.append(f"只有{best_data['count']}张，损失最小")
+        
+        analysis = best_data['analysis']
+        if 'cost' in analysis and analysis['cost'] < 20:
+            reasons.append("缺门成本很低")
+        
+        reason = "、".join(reasons) if reasons else "综合分析最优选择"
+        
+        return {
+            "suit": best_suit_name,
+            "reason": reason
+        }
+
     def provide_advice(self, player: Player, context: Dict) -> str:
         """为人类玩家提供建议"""
         advice = []
