@@ -38,7 +38,7 @@ class Deck:
                         self.tiles.append(Tile(tile_type, value))
                     
         else:  # 国标麻将
-            # 标准144张牌，每种牌4张
+            # 136张牌，只含字牌+风牌+箭牌每种4张。（标准144张牌，加上春夏秋冬梅兰竹菊）
             for tile in ALL_TILES:
                 for _ in range(4):
                     self.tiles.append(tile)

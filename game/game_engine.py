@@ -59,6 +59,7 @@ class GameEngine:
         self.round_number = 0
         self.last_discarded_tile: Optional[Tile] = None
         self.last_discard_player: Optional[Player] = None
+        self.last_drawn_tile: Optional[Tile] = None  # 新增：最后摸到的牌
         self.game_history: List[Dict] = []
         
         # 新增：公共出牌池
@@ -423,11 +424,18 @@ class GameEngine:
     
     def can_player_action(self, player: Player, action: GameAction, tile: Optional[Tile] = None) -> bool:
         """检查玩家是否可以执行动作"""
-        if self.state != GameState.PLAYING:
+        # PASS动作总是可以执行
+        if action is None or action == GameAction.PASS:
+            return True
+            
+        # 只有在PLAYING或WAITING_ACTION状态下才能执行其他动作
+        if self.state not in [GameState.PLAYING, GameState.WAITING_ACTION]:
             return False
         
         if action == GameAction.DISCARD:
-            return (player == self.get_current_player() and 
+            # 只有在PLAYING状态且是当前玩家才能出牌
+            return (self.state == GameState.PLAYING and
+                    player == self.get_current_player() and 
                     tile and tile in player.hand_tiles and
                     self.rule.can_discard(player, tile))
         
@@ -454,6 +462,10 @@ class GameEngine:
     def execute_player_action(self, player: Player, action: GameAction, 
                             tile: Optional[Tile] = None, extra_data: Optional[Dict] = None) -> bool:
         """执行玩家动作"""
+        # 处理PASS动作（选择过）
+        if action is None or action == GameAction.PASS:
+            return self._execute_pass(player)
+        
         if not self.can_player_action(player, action, tile):
             return False
         
@@ -546,6 +558,15 @@ class GameEngine:
             self.current_player_index = player.position
             self.last_discarded_tile = None
             self.last_discard_player = None
+            
+            # 检查碰牌后是否可以胡牌
+            if self.rule and self.rule.can_win(player):
+                player.can_win = True
+                self.logger.info(f"{player.name} 碰牌后可以胡牌")
+            
+            # 碰牌后转换为正常游戏状态，让碰牌玩家继续出牌
+            self.state = GameState.PLAYING
+            
             self._notify_player_action(player, GameAction.PENG, self.last_discarded_tile)
             return True
         
@@ -557,14 +578,38 @@ class GameEngine:
             return False
         
         if player.make_gang(self.last_discarded_tile):
+            # 检查是否流局（杠牌后需要摸牌）
+            if not self.deck or self.deck.get_remaining_count() <= 0:
+                self.logger.info("杠牌后无牌可摸，游戏流局")
+                self._handle_draw_game()
+                return True
+            
             # 杠牌后需要补牌
             new_tile = self.deck.draw_tile()
             if new_tile:
                 player.add_tile(new_tile)
+                self.last_drawn_tile = new_tile  # 记录摸到的牌
+                if player.player_type == PlayerType.HUMAN:
+                    self.logger.info(f"{player.name} 杠牌后摸了一张牌: {new_tile}")
+                else:
+                    self.logger.info(f"{player.name} 杠牌后摸了一张牌")
+            else:
+                self.logger.warning("杠牌后摸牌失败")
+                self._handle_draw_game()
+                return True
             
             self.current_player_index = player.position
             self.last_discarded_tile = None
             self.last_discard_player = None
+            
+            # 检查杠牌后是否可以胡牌
+            if self.rule and self.rule.can_win(player):
+                player.can_win = True
+                self.logger.info(f"{player.name} 杠牌后可以胡牌")
+            
+            # 杠牌后转换为正常游戏状态，让杠牌玩家继续出牌
+            self.state = GameState.PLAYING
+            
             self._notify_player_action(player, GameAction.GANG, self.last_discarded_tile)
             return True
         
@@ -579,6 +624,10 @@ class GameEngine:
             self.current_player_index = player.position
             self.last_discarded_tile = None
             self.last_discard_player = None
+            
+            # 吃牌后转换为正常游戏状态，让吃牌玩家继续出牌
+            self.state = GameState.PLAYING
+            
             self._notify_player_action(player, GameAction.CHI, chi_tiles)
             return True
         
@@ -604,6 +653,26 @@ class GameEngine:
         
         return False
     
+    def _execute_pass(self, player: Player) -> bool:
+        """执行过牌动作"""
+        self.logger.info(f"{player.name} 选择过")
+        
+        # 如果当前在等待响应状态，检查是否所有玩家都已响应
+        if self.state == GameState.WAITING_ACTION:
+            self._handle_response_timeout()
+        
+        return True
+    
+    def _handle_response_timeout(self):
+        """处理响应超时（所有玩家都选择过）"""
+        self.logger.info("所有玩家都选择过，继续游戏")
+        
+        # 重置状态为正常游戏状态
+        self.state = GameState.PLAYING
+        
+        # 进入下一个玩家的回合
+        self._next_player()
+    
     def _next_player(self):
         """下一个玩家"""
         # 切换到下一个玩家
@@ -612,14 +681,25 @@ class GameEngine:
         
         self.logger.info(f"切换到下一个玩家: {current_player.name}")
         
-        # 摸牌（除了第一次庄家出牌，其他情况都要摸牌）
-        if self.deck and self.deck.get_remaining_count() > 0:
-            new_tile = self.deck.draw_tile()
-            if new_tile:
-                current_player.add_tile(new_tile)
+        # 检查是否流局（牌堆已空）
+        if not self.deck or self.deck.get_remaining_count() <= 0:
+            self.logger.info("牌堆已空，游戏流局")
+            self._handle_draw_game()
+            return
+        
+        # 摸牌
+        new_tile = self.deck.draw_tile()
+        if new_tile:
+            current_player.add_tile(new_tile)
+            self.last_drawn_tile = new_tile  # 记录最后摸到的牌
+            if current_player.player_type == PlayerType.HUMAN:
                 self.logger.info(f"{current_player.name} 摸了一张牌: {new_tile}")
             else:
-                self.logger.warning("摸牌失败，牌堆可能已空")
+                self.logger.info(f"{current_player.name} 摸了一张牌")
+        else:
+            self.logger.warning("摸牌失败，牌堆可能已空")
+            self._handle_draw_game()
+            return
         
         # 检查自摸胡牌
         if self.rule and self.rule.can_win(current_player):
@@ -628,6 +708,18 @@ class GameEngine:
         
         # 启动玩家回合
         self._start_player_turn()
+    
+    def _handle_draw_game(self):
+        """处理流局"""
+        self.state = GameState.GAME_OVER
+        self.logger.info("游戏流局，无人胜出")
+        
+        # 流局时所有玩家得分为0
+        scores = {player.name: 0 for player in self.players}
+        
+        # 通知游戏结束
+        if self.on_game_over:
+            self.on_game_over(None, scores)  # winner为None表示流局
     
     def set_player_missing_suit(self, player: Player, suit: str) -> bool:
         """设置玩家缺门"""
