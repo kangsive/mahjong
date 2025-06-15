@@ -162,7 +162,7 @@ class GameEngine:
         self.state = GameState.DEALING
         self._deal_initial_cards()
         
-        # 选择缺门（四川麻将）
+        # 换三张以及选择缺门（四川麻将）
         if self.rule_type == "sichuan":
             self.state = GameState.TILE_EXCHANGE
             self._start_tile_exchange()

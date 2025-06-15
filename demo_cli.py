@@ -14,11 +14,84 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from game.game_engine import GameEngine, GameMode, GameAction
 from game.player import PlayerType, Player
-from game.tile import Tile
+from game.tile import Tile, format_mahjong_tiles
 from ai.trainer_ai import TrainerAI
 from rules.sichuan_rule import SichuanRule
 import random
 from typing import List, Optional
+
+def set_terminal_font_size():
+    """设置终端字体大小以便更好地显示麻将符号"""
+    # 检测终端类型并设置字体大小
+    if os.name == 'nt':  # Windows
+        # Windows下设置控制台字体
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleOutputCP(65001)  # 设置UTF-8编码
+            # 这里可以添加更多Windows特定的字体设置
+        except:
+            pass
+    else:  # Unix/Linux/Mac
+        # 设置终端字体大小（如果支持）
+        try:
+            # 清除任何背景色设置，保持终端默认背景
+            print("\033[0m", end="")  # 重置所有格式
+            # 不设置背景色，让终端保持默认背景
+        except:
+            pass
+
+def format_large_mahjong_tile(tile, index=None, color_code=None):
+    """格式化单个麻将牌为大字体显示"""
+    if color_code is None:
+        color_code = "1;97"  # 默认亮白色粗体
+    
+    symbol = str(tile)
+    
+    if index is not None:
+        return f"\033[{color_code}m[{index}]{symbol}\033[0m"
+    else:
+        return f"\033[{color_code}m{symbol}\033[0m"
+
+def format_large_mahjong_tiles(tiles, with_indices=True, color_scheme="default"):
+    """格式化多个麻将牌为大字体显示"""
+    if not tiles:
+        return ""
+    
+    # 颜色方案 - 只使用前景色，不设置背景色
+    color_schemes = {
+        "default": "1;97",      # 亮白色粗体
+        "hand": "1;93",         # 亮黄色粗体（手牌）
+        "drawn": "1;92",        # 亮绿色粗体（摸到的牌）
+        "discarded": "1;91",    # 亮红色粗体（打出的牌）
+        "action": "1;95",       # 亮紫色粗体（动作相关）
+        "ai": "1;94",          # 亮蓝色粗体（AI出牌）
+        "meld": "1;96",        # 亮青色粗体（组合牌）
+    }
+    
+    color_code = color_schemes.get(color_scheme, color_schemes["default"])
+    
+    formatted_tiles = []
+    for i, tile in enumerate(tiles):
+        if with_indices:
+            formatted_tiles.append(format_large_mahjong_tile(tile, i+1, color_code))
+        else:
+            formatted_tiles.append(format_large_mahjong_tile(tile, None, color_code))
+    
+    return "  ".join(formatted_tiles)  # 使用双空格分隔以增加可读性
+
+def reset_terminal_format():
+    """重置终端格式，确保背景色一致"""
+    print("\033[0m", end="")  # 重置所有格式
+    # 不清屏，保持终端历史
+
+def display_mahjong_banner():
+    """显示麻将游戏横幅"""
+    # 确保格式重置
+    print("\033[0m", end="")
+    print("\n" + "="*80)
+    print("🀄 " + " "*30 + "麻将游戏" + " "*30 + " 🀄")
+    print("="*80)
 
 def display_game_status(engine):
     """显示游戏状态"""
@@ -39,7 +112,8 @@ def display_discard_pool(engine):
         print("   (空)")
         return
     
-    discards_str = " ".join(str(t) for t in engine.discard_pool)
+    # 使用新的格式化函数显示打出的牌
+    discards_str = format_large_mahjong_tiles(engine.discard_pool, with_indices=False, color_scheme="discarded")
     print(f"   {discards_str}")
 
 def display_player_info(engine):
@@ -62,17 +136,17 @@ def display_player_info(engine):
             if player.melds:
                 print(f"   组合: {len(player.melds)}个")
                 for meld in player.melds:
-                    tiles_str = ", ".join(str(t) for t in meld.tiles)
+                    tiles_str = format_large_mahjong_tiles(meld.tiles, with_indices=False, color_scheme="meld")
                     print(f"     {meld.meld_type.value}: {tiles_str}")
             continue
 
-        print(f"   手牌数: {player.get_hand_count()}张")
+        print(f"   手牌: {'🀫 ' * player.get_hand_count()}")
         print(f"   得分: {player.score}")
         
         # 临时调试：显示所有玩家的手牌
-        if player.hand_tiles:
-            hand_str = " ".join(str(tile) for tile in player.hand_tiles)
-            print(f"   🃏 手牌: {hand_str}")
+        # if player.hand_tiles:
+        #     hand_str = " ".join(str(tile) for tile in player.hand_tiles)
+        #     print(f"   🃏 手牌: {hand_str}")
         
         if player.missing_suit:
             print(f"   缺门: {player.missing_suit}")
@@ -80,7 +154,7 @@ def display_player_info(engine):
         if player.melds:
             print(f"   组合: {len(player.melds)}个")
             for meld in player.melds:
-                tiles_str = ", ".join(str(t) for t in meld.tiles)
+                tiles_str = format_large_mahjong_tiles(meld.tiles, with_indices=False, color_scheme="meld")
                 print(f"     {meld.meld_type.value}: {tiles_str}")
 
 def display_human_hand(engine):
@@ -92,14 +166,17 @@ def display_human_hand(engine):
     # 显示刚摸到的牌
     if (hasattr(engine, 'last_drawn_tile') and engine.last_drawn_tile and 
         engine.get_current_player() == human_player):
-        print(f"\n💎 你刚摸到了: {engine.last_drawn_tile}")
+        drawn_tile = format_large_mahjong_tile(engine.last_drawn_tile, color_code="1;32")
+        print(f"\n💎 你刚摸到了: {drawn_tile}")
 
     print(f"\n🃏 {human_player.name}的手牌:")
-    hand_str = " ".join(f"[{i+1}]{tile}" for i, tile in enumerate(human_player.hand_tiles))
+    # 使用新的格式化函数显示手牌
+    hand_str = format_large_mahjong_tiles(human_player.hand_tiles, with_indices=True, color_scheme="hand")
     print(f"   {hand_str}")
     
     if engine.last_discarded_tile:
-        print(f"\n💢 最后打出的牌: {engine.last_discarded_tile}")
+        last_discarded = format_large_mahjong_tile(engine.last_discarded_tile, color_code="1;31")
+        print(f"\n💢 最后打出的牌: {last_discarded}")
 
 def get_ai_advice(engine):
     """获取AI建议"""
@@ -153,13 +230,15 @@ def simulate_human_turn(engine):
                 tile_to_discard = human_player.hand_tiles[choice_idx]
                 
                 if not engine.rule.can_discard(human_player, tile_to_discard):
-                    print(f"🚫 规则不允许打出 {tile_to_discard}。请优先打完缺牌。")
+                    tile_display = format_large_mahjong_tile(tile_to_discard, color_code="1;31")
+                    print(f"🚫 规则不允许打出 {tile_display}。请优先打完缺牌。")
                     continue
                 
-                print(f"你选择了打出: {tile_to_discard}")
+                tile_display = format_large_mahjong_tile(tile_to_discard, color_code="1;33")
+                print(f"你选择了打出: {tile_display}")
                 success = engine.execute_player_action(human_player, GameAction.DISCARD, tile_to_discard)
                 if success:
-                    print(f"✅ 成功打出 {tile_to_discard}")
+                    print(f"✅ 成功打出 {tile_display}")
                     return True
                 else:
                     print("❌ 打牌失败，未知错误。")
@@ -203,7 +282,8 @@ def simulate_ai_turn(engine):
 
     # 使用AI算法选择最优出牌
     tile_to_discard = choose_best_discard_ai(current_player, available_tiles, engine)
-    print(f"{current_player.name}打出: {tile_to_discard}")
+    tile_display = format_large_mahjong_tile(tile_to_discard, color_code="1;34")
+    print(f"{current_player.name}打出: {tile_display}")
     
     success = engine.execute_player_action(current_player, GameAction.DISCARD, tile_to_discard)
     if success:
@@ -212,7 +292,8 @@ def simulate_ai_turn(engine):
         return True
     else:
         # 这是一个严重错误，意味着引擎状态不一致
-        print(f"❌ 严重错误: {current_player.name} 无法打出可选牌 {tile_to_discard}.")
+        error_tile = format_large_mahjong_tile(tile_to_discard, color_code="1;31")
+        print(f"❌ 严重错误: {current_player.name} 无法打出可选牌 {error_tile}.")
         print("   这通常是游戏引擎或规则的内部错误。")
         return False # 发出错误信号
 
@@ -280,7 +361,8 @@ def handle_ai_responses(engine, last_discarder=None):
     }
     action_name = action_name_map.get(action, action.value)
 
-    print(f"\n⚡ {actor.name} 决定对 {engine.last_discarded_tile} 执行: {action_name}!")
+    action_tile = format_large_mahjong_tile(engine.last_discarded_tile, color_code="1;35")
+    print(f"\n⚡ {actor.name} 决定对 {action_tile} 执行: {action_name}!")
     time.sleep(1)
 
     success = engine.execute_player_action(actor, action)
@@ -345,7 +427,8 @@ def check_response_actions(engine):
     if not possible_actions_str:
         return False
     
-    print(f"\n⚡ {human_player.name}, 你可以对 {engine.last_discarded_tile} 执行的动作: {', '.join(possible_actions_str)}")
+    response_tile = format_large_mahjong_tile(engine.last_discarded_tile, color_code="1;36")
+    print(f"\n⚡ {human_player.name}, 你可以对 {response_tile} 执行的动作: {', '.join(possible_actions_str)}")
     prompt = f"请输入你的选择 ({', '.join(possible_actions_str)}, 或 '过'): "
     
     while True:
@@ -392,7 +475,8 @@ def handle_tile_exchange(engine):
     suit_names = {"万": "WAN", "筒": "TONG", "条": "TIAO", "风": "FENG", "箭": "JIAN"}
     for suit_type, tiles in suits.items():
         suit_name = suit_type.value
-        print(f"  {suit_name}: {[str(t) for t in tiles]} ({len(tiles)}张)")
+        tiles_display = format_large_mahjong_tiles(tiles, with_indices=False, color_scheme="default")
+        print(f"  {suit_name}: {tiles_display} ({len(tiles)}张)")
     
     # 获取AI训练师建议
     if engine.mode == GameMode.TRAINING:
@@ -448,14 +532,15 @@ def handle_tile_exchange(engine):
                 if not all(tile.tile_type == first_suit for tile in candidate_tiles):
                     print(f"❌ 必须选择同花色的牌！你选择的牌包含不同花色:")
                     for i, tile in enumerate(candidate_tiles):
-                        print(f"  序号{choice_parts[i]}: {tile} ({tile.tile_type.value})")
+                        tile_display = format_large_mahjong_tile(tile, color_code="1;31")
+                        print(f"  序号{choice_parts[i]}: {tile_display} ({tile.tile_type.value})")
                     continue
                 
                 # 选择成功
                 selected_tiles = candidate_tiles
                 print(f"✅ 已选择三张{first_suit.value}:")
-                for i, tile in enumerate(selected_tiles):
-                    print(f"  序号{choice_parts[i]}: {tile}")
+                selected_display = format_large_mahjong_tiles(selected_tiles, with_indices=False, color_scheme="drawn")
+                print(f"  {selected_display}")
                 break
                 
         except Exception as e:
@@ -463,8 +548,8 @@ def handle_tile_exchange(engine):
     
     # 确认选择
     print(f"\n✅ 你选择了以下三张牌进行交换:")
-    for i, tile in enumerate(selected_tiles, 1):
-        print(f"  {i}. {tile}")
+    confirm_display = format_large_mahjong_tiles(selected_tiles, with_indices=True, color_scheme="action")
+    print(f"  {confirm_display}")
     
     while True:
         confirm = input("确认交换这三张牌吗？(y/n): ").strip().lower()
@@ -485,8 +570,16 @@ def handle_tile_exchange(engine):
 
 def main():
     """主演示函数"""
+    # 重置终端格式，确保背景一致
+    reset_terminal_format()
+    
+    # 设置终端字体以便更好地显示麻将符号
+    set_terminal_font_size()
+    
+    # 显示游戏横幅
+    display_mahjong_banner()
     print("🀄 麻将游戏命令行演示 (血战到底版)")
-    print("=" * 60)
+    print("=" * 80)
 
     # 创建游戏引擎
     engine = GameEngine()
@@ -496,7 +589,7 @@ def main():
     print("✅ 游戏设置完成 - 训练模式，四川麻将")
     
     # 开始游戏
-    if not engine.start_new_game():
+    if not engine.start_new_game(): # AI玩家的缺三张和选择缺门同时再游戏引擎内部进行
         print("❌ 游戏启动失败")
         return
     
@@ -534,8 +627,8 @@ def main():
             received = engine.received_tiles.get(human_player.player_id, [])
             if received:
                 print(f"\n🎁 换牌完成！你获得的三张牌:")
-                for i, tile in enumerate(received, 1):
-                    print(f"  {i}. {tile}")
+                received_str = format_large_mahjong_tiles(received, with_indices=True, color_scheme="drawn")
+                print(f"  {received_str}")
                 print(f"💡 这些牌来自{'上家' if engine.exchange_direction == -1 else '下家'}玩家")
     
     # 处理选择缺门阶段
@@ -580,23 +673,14 @@ def main():
                 else:
                     print("无效的选择，请输入 '万', '筒', 或 '条'.")
 
-    # 为AI玩家自动选择缺门 (四川麻将规则)
-    if isinstance(engine.rule, SichuanRule):
-        for player in engine.players:
-            if player.player_type != PlayerType.HUMAN and not player.missing_suit:
-                # 简单AI逻辑: 选择数量最少或没有的花色作为缺门
-                suit_counts = {"万": 0, "筒": 0, "条": 0}
-                for tile in player.hand_tiles:
-                    tile_str = str(tile)
-                    if len(tile_str) < 2: continue # Safeguard for unexpected tile formats
-                    suit_char = tile_str[-1]
-                    if suit_char in suit_counts:
-                        suit_counts[suit_char] += 1
-                
-                missing_suit = min(suit_counts, key=suit_counts.get)
-                
-                engine.set_player_missing_suit(player, missing_suit)
-                print(f"🎯 {player.name}自动选择缺{missing_suit}")
+    # AI玩家的缺门选择已由游戏引擎自动处理
+    # 等待AI玩家完成选择
+    print("⏳ 等待AI玩家完成缺门选择...")
+    
+    # 显示AI选择结果
+    for player in engine.players:
+        if player.player_type != PlayerType.HUMAN and player.missing_suit:
+            print(f"🎯 {player.name}选择缺{player.missing_suit}")
 
     # 通知引擎定缺完成，开始打牌阶段
     if engine.state.value != 'playing':
@@ -692,6 +776,13 @@ def main():
     
     print("\n感谢试玩麻将游戏演示!")
     print("完整的GUI版本请运行: python3 main.py")
+    
+    # 程序结束时重置终端格式
+    print("\033[0m", end="")
 
 if __name__ == "__main__":
-    main() 
+    try:
+        main()
+    finally:
+        # 确保程序退出时重置终端格式
+        print("\033[0m", end="") 

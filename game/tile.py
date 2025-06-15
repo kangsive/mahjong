@@ -6,6 +6,7 @@
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
+import os
 
 class TileType(Enum):
     """麻将牌类型"""
@@ -49,7 +50,47 @@ class Tile:
                 raise ValueError("箭牌必须指定jian_type")
     
     def __str__(self):
-        """字符串表示"""
+        """字符串表示 - 使用麻将Unicode符号"""
+        return self.get_unicode_symbol()
+    
+    def __repr__(self):
+        return self.__str__()
+    
+    def get_unicode_symbol(self) -> str:
+        """获取对应的麻将Unicode符号"""
+        # 麻将Unicode符号映射
+        if self.tile_type in [TileType.WAN, TileType.TONG, TileType.TIAO]:
+            if self.tile_type == TileType.WAN:
+                # 万子：🀇🀈🀉🀊🀋🀌🀍🀎🀏
+                symbols = ["🀇", "🀈", "🀉", "🀊", "🀋", "🀌", "🀍", "🀎", "🀏"]
+            elif self.tile_type == TileType.TONG:
+                # 筒子：🀙🀚🀛🀜🀝🀞🀟🀠🀡
+                symbols = ["🀙", "🀚", "🀛", "🀜", "🀝", "🀞", "🀟", "🀠", "🀡"]
+            elif self.tile_type == TileType.TIAO:
+                # 条子：🀐🀑🀒🀓🀔🀕🀖🀗🀘
+                symbols = ["🀐", "🀑", "🀒", "🀓", "🀔", "🀕", "🀖", "🀗", "🀘"]
+            return symbols[self.value - 1]
+        elif self.tile_type == TileType.FENG:
+            # 风牌：东🀀 南🀁 西🀂 北🀃
+            feng_symbols = {
+                FengType.DONG: "🀀",
+                FengType.NAN: "🀁", 
+                FengType.XI: "🀂",
+                FengType.BEI: "🀃"
+            }
+            return feng_symbols[self.feng_type]
+        elif self.tile_type == TileType.JIAN:
+            # 箭牌：中🀄 发🀅 白🀆
+            jian_symbols = {
+                JianType.ZHONG: "🀄",
+                JianType.FA: "🀅",
+                JianType.BAI: "🀆"
+            }
+            return jian_symbols[self.jian_type]
+        return "❓"  # 未知牌
+    
+    def get_text_representation(self) -> str:
+        """获取文字表示（用于调试或不支持Unicode的环境）"""
         if self.tile_type in [TileType.WAN, TileType.TONG, TileType.TIAO]:
             return f"{self.value}{self.tile_type.value}"
         elif self.tile_type == TileType.FENG:
@@ -57,9 +98,6 @@ class Tile:
         elif self.tile_type == TileType.JIAN:
             return self.jian_type.value
         return "未知牌"
-    
-    def __repr__(self):
-        return self.__str__()
     
     def is_number_tile(self) -> bool:
         """是否为数字牌"""
@@ -125,4 +163,21 @@ def create_tile_from_string(tile_str: str) -> Tile:
             jian_map = {"中": JianType.ZHONG, "发": JianType.FA, "白": JianType.BAI}
             return Tile(TileType.JIAN, jian_type=jian_map[tile_str])
     
-    raise ValueError(f"无法解析麻将牌字符串: {tile_str}") 
+    raise ValueError(f"无法解析麻将牌字符串: {tile_str}")
+
+def format_mahjong_tiles(tiles, use_large_symbols=True):
+    """格式化麻将牌显示，支持放大显示"""
+    if not tiles:
+        return ""
+    
+    if use_large_symbols:
+        # 使用ANSI转义序列放大字体
+        # 不同终端支持不同的序列，这里使用常见的方法
+        formatted_tiles = []
+        for i, tile in enumerate(tiles):
+            symbol = str(tile)
+            # 添加序号和符号，使用粗体和放大
+            formatted_tiles.append(f"\033[1m[{i+1}]{symbol}\033[0m")
+        return " ".join(formatted_tiles)
+    else:
+        return " ".join(f"[{i+1}]{tile}" for i, tile in enumerate(tiles)) 

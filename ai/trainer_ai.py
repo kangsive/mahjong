@@ -236,25 +236,267 @@ class TrainerAI(BaseAI):
                             reverse=True)
         
         best_suit_name, best_data = sorted_suits[0]
-        tiles = best_data['tiles'][:3]  # 取前三张
         
-        reasons = []
+        # 智能选择最优的三张牌进行交换，并获取详细理由
+        selected_tiles, tile_reasons = self._select_optimal_exchange_tiles_with_reasons(best_data['tiles'])
+        
+        # 组合花色选择理由
+        suit_reasons = []
         analysis = best_data['analysis']
         
         if analysis['isolated'] > 0:
-            reasons.append(f"有{analysis['isolated']}张孤张牌")
+            suit_reasons.append(f"有{analysis['isolated']}张孤张牌")
         if best_data['count'] >= 6:
-            reasons.append("该花色牌张过多")
+            suit_reasons.append("该花色牌张过多")
         if analysis['pairs'] == 0 and analysis['sequences'] == 0:
-            reasons.append("缺乏有效组合")
+            suit_reasons.append("缺乏有效组合")
         
-        reason = "、".join(reasons) if reasons else "综合考虑最优选择"
+        suit_reason = "、".join(suit_reasons) if suit_reasons else "综合考虑最优选择"
+        
+        # 组合完整理由（花色理由 + 具体选牌理由）
+        full_reason = f"{suit_reason}；具体选牌：{tile_reasons}"
         
         return {
             "suit": best_suit_name,
-            "tiles": tiles,
-            "reason": reason
+            "tiles": selected_tiles,
+            "reason": full_reason
         }
+    
+    def _select_optimal_exchange_tiles(self, tiles: List[Tile]) -> List[Tile]:
+        """
+        智能选择最优的三张牌进行交换
+        
+        算法策略：
+        1. 优先选择孤张牌（无法组成顺子或刻子的牌）
+        2. 其次选择边张牌（1,9）
+        3. 避免拆散已有的对子
+        4. 避免拆散潜在的顺子组合
+        5. 如果必须拆散组合，优先保留价值更高的组合
+        
+        Args:
+            tiles: 该花色的所有牌
+            
+        Returns:
+            选中的三张牌列表
+        """
+        selected_tiles, _ = self._select_optimal_exchange_tiles_with_reasons(tiles)
+        return selected_tiles
+    
+    def _select_optimal_exchange_tiles_with_reasons(self, tiles: List[Tile]) -> tuple[List[Tile], str]:
+        """
+        智能选择最优的三张牌进行交换，并返回详细理由
+        
+        Args:
+            tiles: 该花色的所有牌
+            
+        Returns:
+            (选中的三张牌列表, 选择理由)
+        """
+        if len(tiles) <= 3:
+            return tiles[:3], "该花色牌数不足，全部换出"
+        
+        # 按牌值排序，便于分析
+        sorted_tiles = sorted(tiles, key=lambda t: t.value)
+        
+        # 计算每张牌的交换价值（价值越高越适合交换出去）
+        tile_values = []
+        for tile in sorted_tiles:
+            value = self._calculate_tile_exchange_value(tile, sorted_tiles)
+            tile_values.append((tile, value))
+        
+        # 按交换价值排序（价值高的优先交换）
+        tile_values.sort(key=lambda x: x[1], reverse=True)
+        
+        # 选择前三张价值最高的牌
+        selected = [tile for tile, _ in tile_values[:3]]
+        selected_values = [value for _, value in tile_values[:3]]
+        
+        # 生成选择理由
+        reasons = []
+        for i, (tile, value) in enumerate(zip(selected, selected_values)):
+            tile_reason = self._explain_tile_selection_reason(tile, value, sorted_tiles)
+            reasons.append(f"{str(tile)}({tile_reason})")
+        
+        reason_text = "、".join(reasons)
+        
+        return selected, reason_text
+    
+    def _explain_tile_selection_reason(self, tile: Tile, exchange_value: float, all_tiles: List[Tile]) -> str:
+        """
+        解释单张牌被选择的理由
+        
+        Args:
+            tile: 被选择的牌
+            exchange_value: 该牌的交换价值分数
+            all_tiles: 该花色所有牌
+            
+        Returns:
+            选择理由的文字描述
+        """
+        tile_value = tile.value
+        
+        # 统计相同牌的数量
+        same_count = sum(1 for t in all_tiles if t.value == tile_value)
+        
+        # 统计相邻牌的数量
+        adjacent_count = sum(1 for t in all_tiles 
+                           if abs(t.value - tile_value) == 1)
+        
+        reasons = []
+        
+        # 根据交换价值分数的组成来解释
+        if same_count == 1 and adjacent_count == 0:
+            reasons.append("孤张")
+        
+        if tile_value in [1, 9]:
+            reasons.append("边张")
+        
+        if same_count >= 3:
+            reasons.append("多余")
+        elif same_count == 2:
+            reasons.append("破坏对子")
+        
+        # 检查顺子潜力
+        can_form_sequence = self._can_form_sequence_with_tile(tile, all_tiles)
+        if can_form_sequence:
+            reasons.append("破坏顺子")
+        
+        if tile_value in [4, 5, 6]:
+            reasons.append("中张")
+        
+        # 字牌特殊处理
+        if tile.is_honor_tile():
+            if same_count == 1:
+                reasons.append("单张字牌")
+            elif same_count == 2:
+                reasons.append("破坏字牌对子")
+        
+        # 如果没有特殊理由，根据分数给出通用理由
+        if not reasons:
+            if exchange_value > 0:
+                reasons.append("适合换出")
+            else:
+                reasons.append("保留价值低")
+        
+        return "、".join(reasons)
+    
+    def _can_form_sequence_with_tile(self, tile: Tile, all_tiles: List[Tile]) -> bool:
+        """
+        检查该牌是否能与其他牌组成顺子
+        
+        Args:
+            tile: 目标牌
+            all_tiles: 该花色所有牌
+            
+        Returns:
+            是否能组成顺子
+        """
+        if tile.is_honor_tile():
+            return False
+        
+        tile_value = tile.value
+        
+        # 检查是否能组成顺子
+        for offset in [-2, -1, 1, 2]:
+            if 1 <= tile_value + offset <= 9:
+                # 检查是否有足够的牌组成顺子
+                needed_values = []
+                if offset == -2:  # 检查 target-2, target-1, target
+                    needed_values = [tile_value-2, tile_value-1]
+                elif offset == -1:  # 检查 target-1, target, target+1
+                    needed_values = [tile_value-1, tile_value+1]
+                elif offset == 1:   # 检查 target, target+1, target+2
+                    needed_values = [tile_value+1, tile_value+2]
+                elif offset == 2:   # 检查 target-1, target, target+1
+                    needed_values = [tile_value-1, tile_value+1]
+                
+                if all(1 <= v <= 9 and 
+                      any(t.value == v for t in all_tiles) 
+                      for v in needed_values):
+                    return True
+        
+        return False
+    
+    def _calculate_tile_exchange_value(self, target_tile: Tile, all_tiles: List[Tile]) -> float:
+        """
+        计算单张牌的交换价值
+        
+        算法依据：
+        1. 孤张牌价值最高（+50分）
+        2. 边张牌（1,9）价值较高（+30分）
+        3. 多余的牌（超过2张相同）价值较高（+20分）
+        4. 破坏对子的牌价值很低（-40分）
+        5. 破坏顺子的牌价值较低（-25分）
+        6. 中张牌（4,5,6）价值较低（-10分，因为容易组成顺子）
+        
+        Args:
+            target_tile: 目标牌
+            all_tiles: 该花色所有牌
+            
+        Returns:
+            交换价值分数，越高越适合交换
+        """
+        value = 0.0
+        tile_value = target_tile.value
+        
+        # 统计相同牌的数量
+        same_count = sum(1 for t in all_tiles if t.value == tile_value)
+        
+        # 统计相邻牌的数量
+        adjacent_count = sum(1 for t in all_tiles 
+                           if abs(t.value - tile_value) == 1)
+        
+        # 1. 孤张牌判断（前后都没有相邻牌，且只有一张）
+        if same_count == 1 and adjacent_count == 0:
+            value += 50  # 孤张牌最适合交换
+        
+        # 2. 边张牌（1,9）
+        if tile_value in [1, 9]:
+            value += 30  # 边张牌组成顺子机会少
+        
+        # 3. 多余的牌（超过2张相同）
+        if same_count >= 3:
+            value += 20  # 多余的牌可以交换
+        elif same_count == 2:
+            value -= 40  # 对子很宝贵，不要轻易拆散
+        
+        # 4. 顺子潜力分析
+        # 检查是否能组成顺子
+        can_form_sequence = False
+        for offset in [-2, -1, 1, 2]:
+            if 1 <= tile_value + offset <= 9:
+                # 检查是否有足够的牌组成顺子
+                needed_values = []
+                if offset == -2:  # 检查 target-2, target-1, target
+                    needed_values = [tile_value-2, tile_value-1]
+                elif offset == -1:  # 检查 target-1, target, target+1
+                    needed_values = [tile_value-1, tile_value+1]
+                elif offset == 1:   # 检查 target, target+1, target+2
+                    needed_values = [tile_value+1, tile_value+2]
+                elif offset == 2:   # 检查 target-1, target, target+1
+                    needed_values = [tile_value-1, tile_value+1]
+                
+                if all(1 <= v <= 9 and 
+                      any(t.value == v for t in all_tiles) 
+                      for v in needed_values):
+                    can_form_sequence = True
+                    break
+        
+        if can_form_sequence:
+            value -= 25  # 能组成顺子的牌价值较低
+        
+        # 5. 中张牌（4,5,6）容易组成顺子
+        if tile_value in [4, 5, 6]:
+            value -= 10
+        
+        # 6. 字牌特殊处理（如果是字牌）
+        if target_tile.is_honor_tile():
+            if same_count == 1:
+                value += 40  # 单张字牌很适合交换
+            elif same_count == 2:
+                value -= 30  # 字牌对子也很宝贵
+        
+        return value
     
     def provide_missing_suit_advice(self, player: Player) -> str:
         """提供选择缺门的专业建议"""
