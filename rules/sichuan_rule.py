@@ -53,20 +53,26 @@ class SichuanRule(BaseRule):
         if new_tile:
             test_tiles.append(new_tile)
         
-        # 加上已经组合的牌
+        # 计算已有的面子数量
+        existing_melds_count = len(player.melds)
+        
+        # 加上已经组合的牌来检查总牌数
+        all_tiles = test_tiles[:]
         for meld in player.melds:
-            test_tiles.extend(meld.tiles)
+            all_tiles.extend(meld.tiles)
         
         # 检查牌数是否正确（14张）
-        if len(test_tiles) != 14:
+        # 自摸时new_tile为None，但手牌中已包含新摸的牌，所以总数应该是14张
+        # 点炮时new_tile不为None，加入后总数也应该是14张
+        if len(all_tiles) != 14:
             return False
         
-        # 检查是否为七对子
-        if self._is_seven_pairs(test_tiles):
+        # 检查是否为七对子（只在没有melds时适用）
+        if existing_melds_count == 0 and self._is_seven_pairs(all_tiles):
             return True
         
-        # 检查基本胡牌牌型（4个面子+1个对子）
-        return self._check_basic_win_pattern(test_tiles)
+        # 检查基本胡牌牌型，考虑已有的面子
+        return self._check_win_pattern_with_melds(test_tiles, existing_melds_count)
     
     def _check_missing_suit(self, player: Player) -> bool:
         """检查是否满足缺一门条件"""
@@ -102,19 +108,29 @@ class SichuanRule(BaseRule):
         
         return self._try_form_melds(tile_counts, 0, False)
     
-    def _tile_to_key(self, tile: Tile) -> tuple:
-        """将牌转换为可比较的键"""
-        return (tile.tile_type, tile.value)
+    def _check_win_pattern_with_melds(self, hand_tiles: List[Tile], existing_melds_count: int) -> bool:
+        """检查胡牌牌型，考虑已有的面子"""
+        # 需要从手牌中组成的面子数 = 4 - 已有面子数
+        remaining_melds_needed = 4 - existing_melds_count
+        
+        # 统计手牌中每种牌的数量
+        tile_counts = {}
+        for tile in hand_tiles:
+            key = self._tile_to_key(tile)
+            tile_counts[key] = tile_counts.get(key, 0) + 1
+        
+        # 尝试从手牌中组成所需的面子和1个对子
+        return self._try_form_melds(tile_counts, 0, False, remaining_melds_needed)
     
-    def _try_form_melds(self, tile_counts: Dict[tuple, int], melds_formed: int, has_pair: bool) -> bool:
-        """尝试组成面子"""
-        # 如果已经组成了4个面子和1个对子
-        if melds_formed == 4 and has_pair:
+    def _try_form_melds(self, tile_counts: Dict[tuple, int], melds_formed: int, has_pair: bool, target_melds: int = 4) -> bool:
+        """尝试组成面子，支持指定目标面子数"""
+        # 如果已经组成了目标数量的面子和1个对子
+        if melds_formed == target_melds and has_pair:
             return all(count == 0 for count in tile_counts.values())
         
         # 如果牌已经用完但还没形成完整的胡牌牌型
         if all(count == 0 for count in tile_counts.values()):
-            return False
+            return melds_formed == target_melds and has_pair
         
         # 找到第一个还有牌的类型
         tile_key = None
@@ -124,35 +140,41 @@ class SichuanRule(BaseRule):
                 break
         
         if tile_key is None:
-            return False
+            return melds_formed == target_melds and has_pair
         
         count = tile_counts[tile_key]
         
         # 尝试组成对子（如果还没有对子）
         if not has_pair and count >= 2:
             tile_counts[tile_key] -= 2
-            if self._try_form_melds(tile_counts, melds_formed, True):
+            if self._try_form_melds(tile_counts, melds_formed, True, target_melds):
                 tile_counts[tile_key] += 2
                 return True
             tile_counts[tile_key] += 2
         
-        # 尝试组成刻子
-        if count >= 3:
+        # 尝试组成刻子（如果还需要面子）
+        if melds_formed < target_melds and count >= 3:
             tile_counts[tile_key] -= 3
-            if self._try_form_melds(tile_counts, melds_formed + 1, has_pair):
+            if self._try_form_melds(tile_counts, melds_formed + 1, has_pair, target_melds):
                 tile_counts[tile_key] += 3
                 return True
             tile_counts[tile_key] += 3
         
-        # 尝试组成顺子（只对数字牌）
-        if self._is_number_tile_key(tile_key):
+        # 尝试组成顺子（只对数字牌，如果还需要面子）
+        if melds_formed < target_melds and self._is_number_tile_key(tile_key):
             if self._try_form_sequence(tile_counts, tile_key):
-                if self._try_form_melds(tile_counts, melds_formed + 1, has_pair):
+                if self._try_form_melds(tile_counts, melds_formed + 1, has_pair, target_melds):
                     self._restore_sequence(tile_counts, tile_key)
                     return True
                 self._restore_sequence(tile_counts, tile_key)
         
         return False
+    
+    def _tile_to_key(self, tile: Tile) -> tuple:
+        """将牌转换为可比较的键"""
+        return (tile.tile_type, tile.value)
+    
+
     
     def _is_number_tile_key(self, tile_key: tuple) -> bool:
         """检查是否为数字牌键"""

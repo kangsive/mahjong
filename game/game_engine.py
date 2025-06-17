@@ -471,7 +471,12 @@ class GameEngine:
                     len(player.can_chi(self.last_discarded_tile)) > 0)
         
         elif action == GameAction.WIN:
-            return self.rule.can_win(player, self.last_discarded_tile)
+            # 检查自摸胡牌（当前玩家的回合）
+            if player == self.get_current_player() and self.state == GameState.PLAYING:
+                return self.rule.can_win(player, None)  # 自摸胡牌
+            # 检查点炮胡牌（响应其他玩家的出牌）
+            else:
+                return self.rule.can_win(player, self.last_discarded_tile)
         
         return False
     
@@ -651,16 +656,19 @@ class GameEngine:
     
     def _execute_win(self, player: Player) -> bool:
         """执行胡牌"""
-        if self.rule.can_win(player, self.last_discarded_tile):
+        # 判断是否为自摸胡牌
+        is_self_draw = (player == self.get_current_player() and self.state == GameState.PLAYING)
+        
+        # 根据胡牌类型选择正确的牌来检查
+        win_tile = None if is_self_draw else self.last_discarded_tile
+        
+        if self.rule.can_win(player, win_tile):
             player.is_winner = True
             self.state = GameState.GAME_OVER
             
-            # 判断是否为自摸胡牌
-            is_self_draw = self.last_discarded_tile is None
-            
             # 记录胜者信息
             winners = [player.position]
-            winner_tile = self.last_discarded_tile if self.last_discarded_tile else self.last_drawn_tile
+            winner_tile = self.last_drawn_tile if is_self_draw else self.last_discarded_tile
             
             # 检查是否有其他玩家也能胡这张牌（一炮多响，只有点炮时才可能）
             if self.last_discarded_tile and not is_self_draw:
@@ -749,7 +757,8 @@ class GameEngine:
             return
         
         # 检查自摸胡牌
-        if self.rule and self.rule.can_win(current_player):
+        # 注意：摸牌后玩家手牌数变成了14张（13+1），需要检查整体是否构成胡牌
+        if self.rule and self.rule.can_win(current_player, None):
             current_player.can_win = True
             self.logger.info(f"{current_player.name} 可以自摸胡牌")
         

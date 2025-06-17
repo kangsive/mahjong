@@ -2,15 +2,60 @@
 # -*- coding: utf-8 -*-
 """
 麻将游戏命令行演示
+
+用法:
+  python3 demo_cli.py          # 静默模式，禁用所有日志输出
+  python3 demo_cli.py --debug  # 调试模式，启用日志输出
+
+注意: 默认情况下所有日志输出都被禁用，只有加上 --debug 标志才会显示日志
 """
 
 import sys
 import os
 import time
-# import logging # 日志系统已在此文件中完全禁用
+import argparse
+import logging
 
 # 添加项目路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='麻将游戏命令行演示')
+    parser.add_argument('--debug', action='store_true', 
+                       help='启用调试模式，显示日志输出')
+    return parser.parse_args()
+
+def configure_logging(debug_mode):
+    """配置日志系统"""
+    if not debug_mode:
+        # 完全禁用所有日志输出
+        logging.disable(logging.CRITICAL)
+        # 禁用根logger和所有子logger
+        root_logger = logging.getLogger()
+        root_logger.disabled = True
+        root_logger.setLevel(logging.CRITICAL + 1)
+        
+        # 禁用常见的logger名称
+        for logger_name in ['mahjong_game', 'game_engine', 'utils.logger']:
+            logger = logging.getLogger(logger_name)
+            logger.disabled = True
+            logger.setLevel(logging.CRITICAL + 1)
+            # 移除所有handlers以防止任何输出
+            for handler in logger.handlers[:]:
+                logger.removeHandler(handler)
+    else:
+        # 启用日志输出
+        logging.disable(logging.NOTSET)
+        root_logger = logging.getLogger()
+        root_logger.disabled = False
+        root_logger.setLevel(logging.INFO)
+
+# 解析命令行参数
+args = parse_arguments()
+
+# 在导入其他模块之前就配置日志
+configure_logging(args.debug)
 
 from game.game_engine import GameEngine, GameMode, GameAction
 from game.player import PlayerType, Player
@@ -214,6 +259,20 @@ def simulate_human_turn(engine: GameEngine):
 
     if not human_player or current_player != human_player:
         return False
+
+    # 检查是否可以自摸胡牌
+    if engine.can_player_action(human_player, GameAction.WIN):
+        print(f"\n🎉 恭喜！你可以自摸胡牌！")
+        choice = input("是否胡牌？(y/n): ").strip().lower()
+        if choice in ['y', 'yes', '是', '胡']:
+            success = engine.execute_player_action(human_player, GameAction.WIN)
+            if success:
+                print(f"✅ {human_player.name} 自摸胡牌成功！")
+                return True
+            else:
+                print(f"❌ 胡牌失败，继续出牌")
+        else:
+            print(f"选择不胡牌，继续出牌")
 
     print(f"\n🎮 轮到{human_player.name}了! 请选择要打出的牌。")
 
@@ -457,6 +516,37 @@ def check_response_actions(engine: GameEngine):
         else:
             print("无效的选择，请重新输入。")
 
+def select_game_mode():
+    """选择游戏模式"""
+    print("\n" + "="*60)
+    print("🎮 游戏模式选择")
+    print("="*60)
+    print("\n📚 训练模式：")
+    print("   • AI训练师会提供实时建议和策略指导")
+    print("   • 适合学习麻将技巧的新手玩家")
+    print("   • 会在关键决策点给出中文提示")
+    
+    print("\n⚔️  竞技模式：")
+    print("   • 与AI对手进行真实对战")
+    print("   • 考验你的麻将技巧和策略")
+    print("   • 不提供任何提示，完全凭实力")
+    
+    while True:
+        print(f"\n请选择游戏模式:")
+        print("  1 - 训练模式 (推荐新手)")
+        print("  2 - 竞技模式 (挑战高手)")
+        
+        choice = input("\n请输入你的选择 (1 或 2): ").strip()
+        
+        if choice == "1":
+            print("✅ 已选择训练模式 - AI训练师将为你提供指导")
+            return GameMode.TRAINING
+        elif choice == "2":
+            print("✅ 已选择竞技模式 - 准备迎接挑战吧！")
+            return GameMode.COMPETITIVE
+        else:
+            print("❌ 无效选择，请输入 1 或 2")
+
 def handle_tile_exchange(engine):
     """处理换三张阶段的人类玩家交互"""
     human_player = engine.get_human_player()
@@ -585,14 +675,22 @@ def main():
     # 显示游戏横幅
     display_mahjong_banner()
     print("🀄 麻将游戏命令行演示 (血战到底版)")
+    if args.debug:
+        print("🔧 调试模式已启用 - 日志输出可见")
+    else:
+        print("🔇 静默模式 - 日志输出已禁用 (使用 --debug 启用)")
     print("=" * 80)
 
+    # 选择游戏模式
+    selected_mode = select_game_mode()
+    
     # 创建游戏引擎
     engine = GameEngine()
     
-    # 设置训练模式
-    engine.setup_game(GameMode.TRAINING, "sichuan")
-    print("✅ 游戏设置完成 - 训练模式，四川麻将")
+    # 设置游戏模式
+    engine.setup_game(selected_mode, "sichuan")
+    mode_name = "训练模式" if selected_mode == GameMode.TRAINING else "竞技模式"
+    print(f"✅ 游戏设置完成 - {mode_name}，四川麻将")
     
     # 开始游戏
     if not engine.start_new_game(): # AI玩家的缺三张和选择缺门同时再游戏引擎内部进行
@@ -693,7 +791,12 @@ def main():
         engine._start_playing()
     
     print("\n" + "="*60)
-    print("🎮 开始打牌阶段")
+    if engine.mode == GameMode.TRAINING:
+        print("🎮 开始打牌阶段 - 训练模式")
+        print("💡 AI训练师将在关键时刻为你提供建议")
+    else:
+        print("🎮 开始打牌阶段 - 竞技模式")
+        print("⚔️ 凭借你的实力与AI对手一决高下！")
     print("="*60)
     
     last_discarder = None
@@ -768,14 +871,36 @@ def main():
     
     # 检查是否是流局
     game_state = engine.get_game_state()
+    human_player = engine.get_human_player()
+    
     if game_state['state'] == 'game_over':
         # 检查是否有胜者
         winners = [p for p in engine.players if getattr(p, 'is_winner', False)]
         if winners:
             for winner in winners:
                 print(f"🏆 {winner.name} 胡牌获胜!")
+                
+            # 根据模式显示不同的结束信息
+            if engine.mode == GameMode.TRAINING:
+                if human_player in winners:
+                    print(f"\n🎉 恭喜！你在训练模式中获得了胜利！")
+                    print("💡 继续练习，提升你的麻将技巧！")
+                else:
+                    print(f"\n📚 这次虽然没有获胜，但这是很好的学习机会！")
+                    print("💡 AI训练师的建议有助于提升你的策略水平")
+            else:  # 竞技模式
+                if human_player in winners:
+                    print(f"\n🔥 竞技模式获胜！你展现了真正的麻将实力！")
+                    print("⚔️ 恭喜你在没有提示的情况下战胜了AI对手！")
+                else:
+                    print(f"\n💪 竞技模式失利，但失败是成功之母！")
+                    print("🎯 继续挑战，磨练你的麻将技巧！")
         else:
             print("🤝 游戏流局，无人胜出!")
+            if engine.mode == GameMode.TRAINING:
+                print("💡 流局也是麻将的一部分，继续学习胡牌技巧！")
+            else:
+                print("⚔️ 势均力敌的对局，下次再来挑战！")
     
     # 显示得分详情
     print("\n💰 本局得分:")
@@ -791,8 +916,13 @@ def main():
     display_game_status(engine)
     display_player_info(engine)
     
-    print("\n感谢试玩麻将游戏演示!")
+    # 根据模式显示不同的结束提示
+    mode_name = "训练模式" if engine.mode == GameMode.TRAINING else "竞技模式"
+    debug_info = " - 调试模式" if args.debug else " - 静默模式"
+    print(f"\n感谢试玩麻将游戏演示！({mode_name}{debug_info})")
     print("完整的GUI版本请运行: python3 main.py")
+    if not args.debug:
+        print("💡 使用 'python3 demo_cli.py --debug' 可查看详细日志信息")
     
     # 程序结束时重置终端格式
     print("\033[0m", end="")
