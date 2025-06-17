@@ -202,11 +202,22 @@ class SichuanRule(BaseRule):
         """计算得分"""
         scores = {player.name: 0 for player in players}
         
-        # 计算基础番数
-        fan_count = self._calculate_fan(winner, win_tile, is_self_draw)
+        # 计算基础番数（不包含自摸加底）
+        fan_count = self._calculate_fan(winner, win_tile, False)  # 先不算自摸
         
-        # 转换为分数（2的fan_count次方）
-        base_score = min(2 ** fan_count, 2 ** self.max_score)
+        # 四川麻将计分规则：
+        # - 平胡（1番）= 1分
+        # - 其他番型按2的幂次方计算，但有封顶
+        if fan_count == 1:
+            # 平胡固定1分
+            base_score = 1
+        else:
+            # 其他番型按2的幂次方计算
+            base_score = min(2 ** fan_count, 2 ** self.max_score)
+        
+        # 自摸加底：自摸胡再加1分
+        if is_self_draw:
+            base_score += 1
         
         # 血战到底规则
         if is_self_draw:
@@ -231,7 +242,7 @@ class SichuanRule(BaseRule):
     
     def _calculate_fan(self, winner: Player, win_tile: Optional[Tile] = None, 
                       is_self_draw: bool = False) -> int:
-        """计算番数"""
+        """计算番数（不包含自摸加底）"""
         fan_count = 0
         
         # 收集所有牌
@@ -267,10 +278,6 @@ class SichuanRule(BaseRule):
         # 根（杠牌）加番
         gang_count = sum(1 for meld in winner.melds if meld.meld_type.value == "杠")
         fan_count += gang_count
-        
-        # 自摸加底
-        if is_self_draw:
-            fan_count += 1
         
         # 至少1番（平胡）
         fan_count = max(fan_count, 1)
@@ -393,8 +400,7 @@ class SichuanRule(BaseRule):
                 # 检查手牌中是否还有缺门的牌
                 missing_tiles = [t for t in player.hand_tiles if t.tile_type == missing_suit_type]
                 if missing_tiles and tile.tile_type != missing_suit_type:
-                    # 如果还有缺门牌但要打非缺门牌，需要特殊判断
-                    # 这里简化处理，允许打出
-                    pass
+                    # 不允许打出非缺门牌如果手里还有缺门的牌
+                    return False
         
         return True 

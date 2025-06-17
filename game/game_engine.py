@@ -113,8 +113,8 @@ class GameEngine:
             # 训练模式：1个人类玩家 + 1个训练AI + 2个普通AI
             self.players.append(Player("玩家", PlayerType.HUMAN, 0))
             self.players.append(Player("训练师", PlayerType.AI_TRAINER, 1))
-            self.players.append(Player("AI-1", PlayerType.AI_MEDIUM, 2))
-            self.players.append(Player("AI-2", PlayerType.AI_MEDIUM, 3))
+            self.players.append(Player("AI-1", PlayerType.AI_HARD, 2))
+            self.players.append(Player("AI-2", PlayerType.AI_HARD, 3))
         else:
             # 竞技模式：1个人类玩家 + 3个AI
             self.players.append(Player("玩家", PlayerType.HUMAN, 0))

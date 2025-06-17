@@ -174,9 +174,7 @@ def display_human_hand(engine):
     hand_str = format_large_mahjong_tiles(human_player.hand_tiles, with_indices=True, color_scheme="hand")
     print(f"   {hand_str}")
     
-    if engine.last_discarded_tile:
-        last_discarded = format_large_mahjong_tile(engine.last_discarded_tile, color_code="1;31")
-        print(f"\n💢 最后打出的牌: {last_discarded}")
+
 
 def get_ai_advice(engine):
     """获取AI建议"""
@@ -209,7 +207,7 @@ def get_ai_advice(engine):
             print(f"\n🎓 AI训练师建议:")
             print(advice)
 
-def simulate_human_turn(engine):
+def simulate_human_turn(engine: GameEngine):
     """处理人类玩家的回合，获取用户输入"""
     human_player = engine.get_human_player()
     current_player = engine.get_current_player()
@@ -251,7 +249,7 @@ def simulate_human_turn(engine):
             print(f"发生错误: {e}")
             return False
 
-def simulate_ai_turn(engine):
+def simulate_ai_turn(engine: GameEngine):
     """模拟AI回合"""
     current_player = engine.get_current_player()
     
@@ -283,7 +281,8 @@ def simulate_ai_turn(engine):
     # 使用AI算法选择最优出牌
     tile_to_discard = choose_best_discard_ai(current_player, available_tiles, engine)
     tile_display = format_large_mahjong_tile(tile_to_discard, color_code="1;34")
-    print(f"{current_player.name}打出: {tile_display}")
+    print(f"\n🎯 {current_player.name}打出: {tile_display}")
+    print("=" * 40)
     
     success = engine.execute_player_action(current_player, GameAction.DISCARD, tile_to_discard)
     if success:
@@ -312,7 +311,7 @@ def choose_best_discard_ai(player: Player, available_tiles: List[Tile], engine) 
     # 使用AI算法选择出牌
     return ai.choose_discard(player, available_tiles)
 
-def handle_ai_responses(engine, last_discarder=None):
+def handle_ai_responses(engine: GameEngine, last_discarder=None):
     """检查并执行AI对出牌的响应动作"""
     if not engine.last_discarded_tile:
         return False
@@ -377,7 +376,7 @@ def handle_ai_responses(engine, last_discarder=None):
         print(f"❌ {actor.name} 执行 {action_name} 失败。")
         return False
 
-def choose_best_action_ai(player: Player, available_actions: List[GameAction], engine) -> Optional[GameAction]:
+def choose_best_action_ai(player: Player, available_actions: List[GameAction], engine: GameEngine) -> Optional[GameAction]:
     """AI智能选择最优响应动作"""
     from ai.simple_ai import SimpleAI
     from ai.trainer_ai import TrainerAI
@@ -399,7 +398,7 @@ def choose_best_action_ai(player: Player, available_actions: List[GameAction], e
     # 使用AI算法决定动作
     return ai.decide_action(player, available_actions, context)
 
-def check_response_actions(engine):
+def check_response_actions(engine: GameEngine):
     """检查并执行响应动作，获取用户输入"""
     if not engine.last_discarded_tile:
         return False
