@@ -359,13 +359,21 @@ def choose_best_discard_ai(player: Player, available_tiles: List[Tile], engine) 
     """AI智能选择最优出牌"""
     from ai.simple_ai import SimpleAI
     from ai.trainer_ai import TrainerAI
+    from ai.aggressive_ai import AggressiveAI
     
     # 根据玩家类型选择AI
     if player.player_type == PlayerType.AI_TRAINER:
         ai = TrainerAI()
     else:
-        difficulty = "hard" if player.player_type == PlayerType.AI_HARD else "medium"
-        ai = SimpleAI(difficulty)
+        # 从引擎获取AI难度设置
+        ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
+        
+        if ai_difficulty == "easy":
+            ai = SimpleAI("easy")
+        elif ai_difficulty == "medium":
+            ai = AggressiveAI("aggressive")
+        else:  # hard (暂未开放)
+            ai = SimpleAI("hard")  # 临时使用SimpleAI-hard
     
     # 使用AI算法选择出牌
     return ai.choose_discard(player, available_tiles)
@@ -439,13 +447,21 @@ def choose_best_action_ai(player: Player, available_actions: List[GameAction], e
     """AI智能选择最优响应动作"""
     from ai.simple_ai import SimpleAI
     from ai.trainer_ai import TrainerAI
+    from ai.aggressive_ai import AggressiveAI
     
     # 根据玩家类型选择AI
     if player.player_type == PlayerType.AI_TRAINER:
         ai = TrainerAI()
     else:
-        difficulty = "hard" if player.player_type == PlayerType.AI_HARD else "medium"
-        ai = SimpleAI(difficulty)
+        # 从引擎获取AI难度设置
+        ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
+        
+        if ai_difficulty == "easy":
+            ai = SimpleAI("easy")
+        elif ai_difficulty == "medium":
+            ai = AggressiveAI("aggressive")
+        else:  # hard (暂未开放)
+            ai = SimpleAI("hard")  # 临时使用SimpleAI-hard
     
     # 构建上下文
     context = {
@@ -546,6 +562,46 @@ def select_game_mode():
             return GameMode.COMPETITIVE
         else:
             print("❌ 无效选择，请输入 1 或 2")
+
+def select_ai_difficulty():
+    """选择AI对手难度"""
+    print("\n" + "="*60)
+    print("🤖 AI对手难度选择")
+    print("="*60)
+    print("\n🎯 Easy (简单)：")
+    print("   • AI决策较为随机，容易出现失误")
+    print("   • 适合麻将新手练习基础操作")
+    print("   • 流局率较高，游戏节奏相对缓慢")
+    
+    print("\n⚔️ Medium (中等)：")
+    print("   • 使用激进AI策略，积极进攻")
+    print("   • 快速决策，降低流局率")
+    print("   • 适合有一定经验的玩家")
+    
+    print("\n🔥 Hard (困难)：")
+    print("   • 暂未开放 (需要流局率低于10%)")
+    print("   • 敬请期待后续版本更新")
+    
+    while True:
+        print(f"\n请选择AI难度:")
+        print("  1 - Easy (简单)")
+        print("  2 - Medium (中等)")
+        print("  3 - Hard (困难) [暂未开放]")
+        
+        choice = input("\n请输入你的选择 (1-3): ").strip()
+        
+        if choice == "1":
+            print("✅ 已选择 Easy 难度 - AI将使用简单策略")
+            return "easy"
+        elif choice == "2":
+            print("✅ 已选择 Medium 难度 - AI将使用激进策略")
+            return "medium"
+        elif choice == "3":
+            print("❌ Hard 难度暂未开放")
+            print("💡 提示：Hard难度正在开发中，需要确保流局率低于10%")
+            continue
+        else:
+            print("❌ 无效选择，请输入 1、2 或 3")
 
 def handle_tile_exchange(engine):
     """处理换三张阶段的人类玩家交互"""
@@ -684,13 +740,27 @@ def main():
     # 选择游戏模式
     selected_mode = select_game_mode()
     
+    # 选择AI难度（仅在竞技模式下）
+    if selected_mode == GameMode.COMPETITIVE:
+        ai_difficulty = select_ai_difficulty()
+    else:
+        ai_difficulty = "medium"  # 训练模式默认使用中等难度
+    
     # 创建游戏引擎
     engine = GameEngine()
+    
+    # 设置AI难度属性
+    engine.ai_difficulty = ai_difficulty
     
     # 设置游戏模式
     engine.setup_game(selected_mode, "sichuan")
     mode_name = "训练模式" if selected_mode == GameMode.TRAINING else "竞技模式"
-    print(f"✅ 游戏设置完成 - {mode_name}，四川麻将")
+    difficulty_name = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(ai_difficulty, "中等")
+    
+    if selected_mode == GameMode.COMPETITIVE:
+        print(f"✅ 游戏设置完成 - {mode_name}，四川麻将，AI难度：{difficulty_name}")
+    else:
+        print(f"✅ 游戏设置完成 - {mode_name}，四川麻将")
     
     # 开始游戏
     if not engine.start_new_game(): # AI玩家的缺三张和选择缺门同时再游戏引擎内部进行
@@ -919,7 +989,12 @@ def main():
     # 根据模式显示不同的结束提示
     mode_name = "训练模式" if engine.mode == GameMode.TRAINING else "竞技模式"
     debug_info = " - 调试模式" if args.debug else " - 静默模式"
-    print(f"\n感谢试玩麻将游戏演示！({mode_name}{debug_info})")
+    ai_difficulty_info = ""
+    if hasattr(engine, 'ai_difficulty') and engine.mode == GameMode.COMPETITIVE:
+        difficulty_name = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(engine.ai_difficulty, "中等")
+        ai_difficulty_info = f", AI难度: {difficulty_name}"
+    
+    print(f"\n感谢试玩麻将游戏演示！({mode_name}{ai_difficulty_info}{debug_info})")
     print("完整的GUI版本请运行: python3 main.py")
     if not args.debug:
         print("💡 使用 'python3 demo_cli.py --debug' 可查看详细日志信息")
