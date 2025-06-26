@@ -30,7 +30,7 @@ class SichuanRule(BaseRule):
             
             # 2番牌型
             WinPattern("七对子", "七个对子", 2),
-            WinPattern("清一色", "只有一种花色", 2),
+            WinPattern("清一色", "只有一种花色", 1),
             WinPattern("全带幺", "所有面子都带幺九牌", 2),
         ]
     
@@ -223,41 +223,45 @@ class SichuanRule(BaseRule):
         """计算得分"""
         scores = {player.name: 0 for player in players}
         
-        # 计算基础番数（不包含自摸加底）
-        fan_count = self._calculate_fan(winner, win_tile, False)  # 先不算自摸
-        
-        # 四川麻将计分规则：
-        # - 平胡（1番）= 1分
-        # - 其他番型按2的幂次方计算，但有封顶
-        if fan_count == 1:
-            # 平胡固定1分
-            base_score = 1
-        else:
-            # 其他番型按2的幂次方计算
-            base_score = min(2 ** fan_count, 2 ** self.max_score)
-        
-        # 自摸加底：自摸胡再加1分
+        # --------------------------------------------------
+        # 1) 计算基础分
+        #    • 平胡基础 1 分
+        #    • 自摸加底 +1 分
+        #    • 明杠 +1 分 / 每杠
+        #    • 暗杠 +2 分 / 每杠
+        base_points = 1  # 平胡基础
+
+        # 自摸加底
         if is_self_draw:
-            base_score += 1
+            base_points += 1
+
+        # --------------------------------------------------
+        # 2) 计算番数（不含自摸加底，但包含杠番）
+        #    最大 8 番封顶
+        fan_count = self._calculate_fan(winner, win_tile, is_self_draw)
+
+        # --------------------------------------------------
+        # 3) 最终单家输赢 = base_points × 2^fan_count
+        final_point = base_points * (2 ** fan_count)
         
         # 血战到底规则
         if is_self_draw:
-            # 自摸：其他所有人都付钱
-            other_players = [p for p in players if p != winner]
-            for player in other_players:
-                scores[player.name] = -base_score
-            scores[winner.name] = base_score * len(other_players)
+            # 自摸：场上仍未胡牌的活跃玩家付钱
+            payers = [p for p in players if p != winner and not getattr(p, 'is_winner', False)]
+            for payer in payers:
+                scores[payer.name] = -final_point
+                scores[winner.name] += final_point
         else:
-            # 点炮：放炮者付钱
+            # 点炮：仅放炮者付钱
             if discard_player and discard_player != winner:
-                scores[discard_player.name] = -base_score
-                scores[winner.name] = base_score
+                scores[discard_player.name] = -final_point
+                scores[winner.name] = final_point
             else:
-                # 如果没有明确的放炮者，按自摸处理（保险起见）
-                other_players = [p for p in players if p != winner]
-                for player in other_players:
-                    scores[player.name] = -base_score
-                scores[winner.name] = base_score * len(other_players)
+                # 保险：若无放炮者信息，视为自摸情况
+                payers = [p for p in players if p != winner and not getattr(p, 'is_winner', False)]
+                for payer in payers:
+                    scores[payer.name] = -final_point
+                    scores[winner.name] += final_point
         
         return scores
     
@@ -280,9 +284,9 @@ class SichuanRule(BaseRule):
         if self._is_seven_pairs(all_tiles):
             fan_count += 2
         
-        # 清一色（2番）
+        # 清一色（1番）
         elif self._is_flush(all_tiles):
-            fan_count += 2
+            fan_count += 1
         
         # 大对子（1番）
         elif self._is_all_triplets(all_tiles):
@@ -300,9 +304,7 @@ class SichuanRule(BaseRule):
         gang_count = sum(1 for meld in winner.melds if meld.meld_type.value == "杠")
         fan_count += gang_count
         
-        # 至少1番（平胡）
-        fan_count = max(fan_count, 1)
-        
+        # 返回番数（不加平胡额外番，平胡记作0番）
         return min(fan_count, self.max_score)
     
     def _is_seven_pairs(self, tiles: List[Tile]) -> bool:

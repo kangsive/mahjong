@@ -461,9 +461,9 @@ class GameEngine:
                     player.can_peng(self.last_discarded_tile))
         
         elif action == GameAction.GANG:
-            # 明杠：响应其他玩家的出牌
-            if (player != self.last_discard_player and
-                self.last_discarded_tile and
+            # 明杠：只有当玩家对上一张弃牌拥有三张相同牌时才成立
+            if (self.last_discarded_tile and
+                player != self.last_discard_player and
                 player.can_gang(self.last_discarded_tile)):
                 return True
             # 暗杠：当前玩家的回合，可以杠自己手中的四张相同牌
@@ -615,8 +615,9 @@ class GameEngine:
         gang_tile = None
         
         # 判断是明杠还是暗杠
-        if self.last_discarded_tile and player != self.last_discard_player:
-            # 明杠：响应其他玩家的出牌
+        if (self.last_discarded_tile and
+            player != self.last_discard_player and
+            player.can_gang(self.last_discarded_tile)):
             gang_tile = self.last_discarded_tile
             is_hidden_gang = False
         elif tile and player == self.get_current_player():
@@ -632,8 +633,19 @@ class GameEngine:
         # 执行杠牌操作
         if is_hidden_gang:
             success = player.make_hidden_gang(gang_tile)
+            # 暗杠立即结算：所有仍在场且未胡牌玩家各付 2 分
+            if success:
+                for p in self.players:
+                    if p == player or getattr(p, 'is_winner', False):
+                        continue
+                    p.score -= 2
+                    player.score += 2
         else:
             success = player.make_gang(gang_tile)
+            # 明杠立即结算：放杠者支付 1 分
+            if success and self.last_discard_player and self.last_discard_player != player:
+                self.last_discard_player.score -= 1
+                player.score += 1
         
         if not success:
             return False
