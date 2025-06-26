@@ -747,11 +747,15 @@ class GameEngine:
             
             winner_tile = self.last_drawn_tile if is_self_draw else self.last_discarded_tile
             
+            # 收集所有能胡这张牌的玩家（一炮多响检测）
+            all_winners = [player]  # 当前胡牌玩家
+            
             # 检查是否有其他玩家也能胡这张牌（一炮多响，只有点炮时才可能）
             if self.last_discarded_tile and not is_self_draw:
                 for other_player in self.players:
                     if (other_player != player and 
                         other_player != self.last_discard_player and
+                        not getattr(other_player, 'is_winner', False) and  # 避免重复处理
                         self.rule.can_win(other_player, self.last_discarded_tile)):
                         # 其他玩家也能胡，也将胡牌加入其手牌
                         other_player.add_tile_to_hand(self.last_discarded_tile)
@@ -761,31 +765,39 @@ class GameEngine:
                             self.winners.append(other_id)
                         if other_id in self.active_players:
                             self.active_players.remove(other_id)
+                        all_winners.append(other_player)
             
-            # 计算得分，传递正确的自摸标志和放炮者信息
-            scores = self.rule.calculate_score(
-                player, self.players, winner_tile, 
-                is_self_draw=is_self_draw,
-                discard_player=self.last_discard_player
-            )
-            
-            for p in self.players:
-                score_change = scores[p.name]
-                p.score += score_change
-                # 记录本局得分变化用于显示
-                p.last_score_change = score_change
-                if p.is_winner:
-                    p.wins += 1
-                else:
-                    p.losses += 1
-            
-            # 记录胡牌类型用于显示
-            win_type = "自摸" if is_self_draw else "点炮胡"
-            current_rank = len(self.winners)
-            rank_names = ["", "第一名", "第二名", "第三名", "第四名"]
-            rank_name = rank_names[current_rank] if current_rank < len(rank_names) else f"第{current_rank}名"
-            
-            self.logger.info(f"{player.name} {win_type}胡牌！获得{rank_name}！胡牌: {winner_tile}")
+            # 为每个胡牌的玩家单独计分
+            for winner_player in all_winners:
+                # 计算得分，传递正确的自摸标志和放炮者信息
+                scores = self.rule.calculate_score(
+                    winner_player, self.players, winner_tile, 
+                    is_self_draw=is_self_draw,
+                    discard_player=self.last_discard_player
+                )
+                
+                # 应用得分变化
+                for p in self.players:
+                    score_change = scores[p.name]
+                    p.score += score_change
+                    # 累加本局得分变化用于显示
+                    if not hasattr(p, 'last_score_change'):
+                        p.last_score_change = 0
+                    p.last_score_change += score_change
+                    
+                # 更新胜负记录
+                winner_player.wins += 1
+                for p in self.players:
+                    if p != winner_player and not getattr(p, 'is_winner', False):
+                        p.losses += 1
+                
+                # 记录胡牌类型用于显示
+                win_type = "自摸" if is_self_draw else "点炮胡"
+                current_rank = len([w for w in all_winners if self.winners.index(w.position) <= self.winners.index(winner_player.position)])
+                rank_names = ["", "第一名", "第二名", "第三名", "第四名"]
+                rank_name = rank_names[current_rank] if current_rank < len(rank_names) else f"第{current_rank}名"
+                
+                self.logger.info(f"{winner_player.name} {win_type}胡牌！获得{rank_name}！胡牌: {winner_tile}")
             
             # 血战到底：检查游戏是否结束
             if len(self.active_players) <= 1:
@@ -807,7 +819,9 @@ class GameEngine:
                 # 记录游戏结果用于下局决定庄家
                 self._record_game_result(self.winners, winner_tile)
                 
-                self._notify_game_over(player, scores, is_self_draw, winner_tile)
+                # 传递最后一个胜者和总得分信息
+                final_scores = {p.name: getattr(p, 'last_score_change', 0) for p in self.players}
+                self._notify_game_over(all_winners[-1], final_scores, is_self_draw, winner_tile)
                 
                 self.logger.info(f"血战到底结束！最终排名: {[self.players[i].name for i in self.winners]}")
             else:
