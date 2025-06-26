@@ -400,28 +400,13 @@ def simulate_ai_turn(engine: GameEngine):
 
 def choose_best_discard_ai(player: Player, available_tiles: List[Tile], engine) -> Tile:
     """AI智能选择最优出牌"""
-    from ai.simple_ai import SimpleAI
-    from ai.trainer_ai import TrainerAI
-    from ai.aggressive_ai import AggressiveAI
-    from ai.mcts_ai import MctsAI
+    # 使用引擎的统一AI创建方法
+    ai = engine.create_ai_instance(player.player_type)
     
-    # 根据玩家类型选择AI
-    if player.player_type == PlayerType.AI_TRAINER:
-        ai = TrainerAI()
-    else:
-        # print(f"选择AI难度在打牌前: {player.player_type}")
-        # 从引擎获取AI难度设置
-        ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
-        
-        if ai_difficulty == "easy":
-            ai = SimpleAI("easy")
-        elif ai_difficulty == "medium":
-            ai = AggressiveAI("aggressive")
-        elif ai_difficulty == "hard":
-            ai = MctsAI(difficulty="hard", engine=engine)
-        else:  # expert 难度，使用 ShantenAI
-            # print(f"选了专家难度: {ai_difficulty}")
-            ai = ShantenAI(difficulty="hard")
+    if ai is None:
+        # 如果AI创建失败，使用简单的随机选择作为后备
+        import random
+        return random.choice(available_tiles)
     
     # 使用AI算法选择出牌
     return ai.choose_discard(player, available_tiles)
@@ -521,28 +506,12 @@ def decide_hidden_gang_ai(player: Player, hidden_gang_tiles: List[Tile], engine:
 
 def choose_best_action_ai(player: Player, available_actions: List[GameAction], engine: GameEngine) -> Optional[GameAction]:
     """AI智能选择最优响应动作"""
-    from ai.simple_ai import SimpleAI
-    from ai.trainer_ai import TrainerAI
-    from ai.aggressive_ai import AggressiveAI
-    from ai.mcts_ai import MctsAI
+    # 使用引擎的统一AI创建方法
+    ai = engine.create_ai_instance(player.player_type)
     
-    # 根据玩家类型选择AI
-    if player.player_type == PlayerType.AI_TRAINER:
-        ai = TrainerAI()
-    else:
-        # print(f"选择AI难度在响应动作前: {player.player_type}")
-        # 从引擎获取AI难度设置
-        ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
-        
-        if ai_difficulty == "easy":
-            ai = SimpleAI("easy")
-        elif ai_difficulty == "medium":
-            ai = AggressiveAI("aggressive")
-        elif ai_difficulty == "hard":
-            ai = MctsAI(difficulty="hard", engine=engine)
-        else:  # expert 难度，使用 ShantenAI
-            # print(f"响应时选了专家难度: {ai_difficulty}")
-            ai = ShantenAI(difficulty="hard")
+    if ai is None:
+        # 如果AI创建失败，默认选择过
+        return GameAction.PASS
     
     # 构建上下文
     context = {

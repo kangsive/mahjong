@@ -219,21 +219,46 @@ class GameEngine:
     
     def _ai_choose_exchange_tiles(self, player_id: int, player: Player):
         """AI选择换牌"""
-        # 按花色分组
-        suits = {}
-        for tile in player.hand_tiles:
-            if tile.tile_type not in suits:
-                suits[tile.tile_type] = []
-            suits[tile.tile_type].append(tile)
+        # 尝试使用指定AI类的方法
+        exchange_tiles = self._try_ai_exchange_tiles(player)
         
-        # 选择数量最多的花色的前三张牌
-        if suits:
-            max_suit = max(suits.keys(), key=lambda s: len(suits[s]))
-            exchange_tiles = suits[max_suit][:3]
+        if exchange_tiles and len(exchange_tiles) == 3:
+            # AI类提供了有效的换牌选择
+            self.submit_exchange_tiles(player_id, exchange_tiles)
+            self.logger.info(f"AI玩家 {player_id} 使用AI算法选择换牌: {[str(t) for t in exchange_tiles]}")
+        else:
+            # 使用默认逻辑：按花色分组，选择数量最多的花色的前三张牌
+            suits = {}
+            for tile in player.hand_tiles:
+                if tile.tile_type not in suits:
+                    suits[tile.tile_type] = []
+                suits[tile.tile_type].append(tile)
             
-            if len(exchange_tiles) == 3:
-                self.submit_exchange_tiles(player_id, exchange_tiles)
-                self.logger.info(f"AI玩家 {player_id} 自动选择换牌: {[str(t) for t in exchange_tiles]}")
+            # 选择数量最多的花色的前三张牌
+            if suits:
+                max_suit = max(suits.keys(), key=lambda s: len(suits[s]))
+                exchange_tiles = suits[max_suit][:3]
+                
+                if len(exchange_tiles) == 3:
+                    self.submit_exchange_tiles(player_id, exchange_tiles)
+                    self.logger.info(f"AI玩家 {player_id} 使用默认策略选择换牌: {[str(t) for t in exchange_tiles]}")
+    
+    def _try_ai_exchange_tiles(self, player: Player) -> Optional[List[Tile]]:
+        """尝试使用AI类的换牌方法"""
+        try:
+            ai = self._create_ai_for_player(player)
+            if ai and hasattr(ai, 'choose_exchange_tiles'):
+                # AI类有换牌方法，使用它
+                tiles = ai.choose_exchange_tiles(player, 3)
+                # 验证返回的牌是否有效
+                if (tiles and len(tiles) == 3 and 
+                    all(tile in player.hand_tiles for tile in tiles) and
+                    self._is_same_suit(tiles)):
+                    return tiles
+            return None
+        except Exception as e:
+            self.logger.warning(f"AI换牌方法执行失败: {e}")
+            return None
     
     def submit_exchange_tiles(self, player_id: int, tiles: List[Tile]) -> bool:
         """
@@ -352,7 +377,19 @@ class GameEngine:
     
     def _ai_choose_missing_suit(self, player_id: int, player: Player):
         """AI选择缺门"""
-        # 统计各花色数量，选择最少的
+        # 尝试使用指定AI类的方法
+        missing_suit_str = self._try_ai_missing_suit(player)
+        
+        if missing_suit_str:
+            # AI类提供了有效的缺门选择，转换为TileType
+            suit_map = {"万": TileType.WAN, "筒": TileType.TONG, "条": TileType.TIAO}
+            missing_suit = suit_map.get(missing_suit_str)
+            if missing_suit:
+                self.submit_missing_suit(player_id, missing_suit)
+                self.logger.info(f"AI玩家 {player_id} 使用AI算法选择缺{missing_suit.value}")
+                return
+        
+        # 使用默认逻辑：统计各花色数量，选择最少的
         suit_counts = {TileType.WAN: 0, TileType.TONG: 0, TileType.TIAO: 0}
         for tile in player.hand_tiles:
             if tile.tile_type in suit_counts:
@@ -360,7 +397,22 @@ class GameEngine:
         
         missing_suit = min(suit_counts.keys(), key=lambda s: suit_counts[s])
         self.submit_missing_suit(player_id, missing_suit)
-        self.logger.info(f"AI玩家 {player_id} 自动选择缺{missing_suit.value}")
+        self.logger.info(f"AI玩家 {player_id} 使用默认策略选择缺{missing_suit.value}")
+    
+    def _try_ai_missing_suit(self, player: Player) -> Optional[str]:
+        """尝试使用AI类的缺门选择方法"""
+        try:
+            ai = self._create_ai_for_player(player)
+            if ai and hasattr(ai, 'choose_missing_suit'):
+                # AI类有缺门选择方法，使用它
+                suit_str = ai.choose_missing_suit(player)
+                # 验证返回的缺门是否有效
+                if suit_str in ["万", "筒", "条"]:
+                    return suit_str
+            return None
+        except Exception as e:
+            self.logger.warning(f"AI缺门选择方法执行失败: {e}")
+            return None
     
     def submit_missing_suit(self, player_id: int, suit: TileType) -> bool:
         """
@@ -1103,4 +1155,50 @@ class GameEngine:
                 removed_tile, removed_player = self.discard_pool.pop(i)
                 self.logger.info(f"从出牌池移除: {removed_tile} (原打出者: {removed_player})")
                 return True
-        return False 
+        return False
+    
+    def _create_ai_for_player(self, player: Player) -> Optional:
+        """为玩家创建对应的AI实例"""
+        return self.create_ai_instance(player.player_type)
+    
+    def create_ai_instance(self, player_type: PlayerType = None, ai_difficulty: str = None):
+        """
+        创建AI实例的统一方法
+        
+        Args:
+            player_type: 玩家类型，如果为None则使用ai_difficulty参数
+            ai_difficulty: AI难度，如果为None则使用引擎的ai_difficulty属性
+            
+        Returns:
+            AI实例或None
+        """
+        try:
+            # 如果指定了玩家类型且为训练AI，直接返回训练AI
+            if player_type == PlayerType.AI_TRAINER:
+                from ai.trainer_ai import TrainerAI
+                return TrainerAI()
+            
+            # 确定AI难度
+            if ai_difficulty is None:
+                ai_difficulty = getattr(self, 'ai_difficulty', 'medium')
+            
+            # 根据难度创建AI实例
+            if ai_difficulty == "easy":
+                from ai.simple_ai import SimpleAI
+                return SimpleAI("easy")
+            elif ai_difficulty == "medium":
+                from ai.aggressive_ai import AggressiveAI
+                return AggressiveAI("aggressive")
+            elif ai_difficulty == "hard":
+                from ai.mcts_ai import MctsAI
+                return MctsAI(difficulty="hard", engine=self)
+            else:  # expert 难度，使用 ShantenAI
+                from ai.shanten_ai import ShantenAI
+                return ShantenAI(difficulty="hard")
+                
+        except ImportError as e:
+            self.logger.warning(f"无法导入AI类: {e}")
+            return None
+        except Exception as e:
+            self.logger.warning(f"创建AI实例失败: {e}")
+            return None 

@@ -910,11 +910,8 @@ class GameWindow:
                 current_player = self.game_engine.get_current_player()
                 
                 if current_player and current_player.player_type != PlayerType.HUMAN:
-                    # 导入AI模块
-                    from ai.simple_ai import SimpleAI
-                    
-                    # 创建AI实例
-                    ai = SimpleAI("medium" if current_player.player_type == PlayerType.AI_MEDIUM else "hard")
+                    # 使用游戏引擎的统一AI创建方法
+                    ai = self.game_engine.create_ai_instance(current_player.player_type)
                     
                     # 检查是否可以胡牌
                     if self.game_engine.rule and self.game_engine.rule.can_win(current_player):
@@ -928,7 +925,7 @@ class GameWindow:
                     available_tiles = [t for t in current_player.hand_tiles 
                                      if self.game_engine.rule and self.game_engine.rule.can_discard(current_player, t)]
                     
-                    if available_tiles:
+                    if available_tiles and ai:
                         # 使用AI算法选择出牌
                         tile_to_discard = ai.choose_discard(current_player, available_tiles)
                         
@@ -981,8 +978,6 @@ class GameWindow:
                 if not self.game_engine.last_discarded_tile:
                     return
                 
-                from ai.simple_ai import SimpleAI
-                
                 # 检查每个AI玩家的响应
                 responded = False
                 
@@ -990,7 +985,8 @@ class GameWindow:
                     if (player.player_type != PlayerType.HUMAN and 
                         player != self.game_engine.last_discard_player):
                         
-                        ai = SimpleAI("medium" if player.player_type == PlayerType.AI_MEDIUM else "hard")
+                        # 使用游戏引擎的统一AI创建方法
+                        ai = self.game_engine.create_ai_instance(player.player_type)
                         
                         # 检查可用动作
                         available_actions = []
@@ -1001,7 +997,7 @@ class GameWindow:
                         if player.can_peng(self.game_engine.last_discarded_tile):
                             available_actions.append(GameAction.PENG)
                         
-                        if available_actions:
+                        if available_actions and ai:
                             available_actions.append(GameAction.PASS)
                             
                             # AI决策

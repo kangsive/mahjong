@@ -1262,8 +1262,42 @@ class ShantenAI(BaseAI):
         value = 0.0
         
         if action == GameAction.PENG:
-            # TODO - 如果碰牌减少向听数，则无奖励或者减分
-            value += 20.0
+            # 模拟碰牌后的向听数变化
+            peng_tile = context.get('last_tile')  # 要碰的牌
+            if peng_tile:
+                # 模拟碰牌后的手牌状态
+                simulated_tiles = player.hand_tiles.copy()
+                # 移除两张相同的牌（碰牌需要手中有两张相同的牌）
+                removed_count = 0
+                for tile in simulated_tiles[:]:
+                    if (tile.tile_type == peng_tile.tile_type and 
+                        tile.value == peng_tile.value and 
+                        tile.feng_type == peng_tile.feng_type and 
+                        tile.jian_type == peng_tile.jian_type):
+                        simulated_tiles.remove(tile)
+                        removed_count += 1
+                        if removed_count >= 2:
+                            break
+                
+                # 计算碰牌后的向听数（面子数+1）
+                after_peng_shanten = ShantenCalculator.calculate_shanten(
+                    simulated_tiles, len(player.melds) + 1
+                )
+                
+                # 根据向听数变化给分
+                shanten_change = current_shanten - after_peng_shanten
+                if shanten_change > 0:
+                    # 向听数减少，给予奖励
+                    value += 30.0 + shanten_change * 10.0
+                elif shanten_change == 0:
+                    # 向听数不变，小幅奖励（获得确定的面子）
+                    value += 5.0
+                else:
+                    # 向听数增加，给予惩罚
+                    value -= 15.0
+            else:
+                # 没有碰牌信息，默认小幅奖励
+                value += 5.0
         elif action == GameAction.GANG:
             # 杠牌获得额外摸牌机会，在川麻里还有能获得一番
             value += 50.0
