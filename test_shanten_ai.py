@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 logging.disable(logging.CRITICAL)
 
 from game.tile import Tile, TileType, FengType, JianType
-from game.player import Player, PlayerType
+from game.player import Meld, MeldType, Player, PlayerType
 from game.game_engine import GameEngine, GameMode
 from ai.shanten_ai import ShantenAI, ShantenCalculator, UkeireCalculator, TileEfficiencyAnalyzer
 from ai.simple_ai import SimpleAI
@@ -128,7 +128,8 @@ def test_ukeire_calculation():
     print("=" * 50)
     
     # 测试一向听手牌的有效进张
-    tiles = create_test_tiles(["1万", "2万", "3万", "4万", "5万", "6万", "7万", "8万", "9万", "1筒", "1筒", "4筒", "5筒"])
+    # tiles = create_test_tiles(["1万", "2万", "3万", "4万", "5万", "6万", "7万", "8万", "9万", "1筒", "1筒", "4筒", "5筒"])
+    tiles = create_test_tiles(["1万", "1万", "1万", "6万", "4筒", "5筒", "6筒", "8筒", "8筒", "5万"])
     
     ukeire = UkeireCalculator.calculate_ukeire(tiles)
     total_ukeire = sum(ukeire.values())
@@ -168,7 +169,14 @@ def test_tile_efficiency_analysis():
     # hand_tiles = create_test_tiles([
     #     "1万", "9万", "1筒", "3筒", "4筒", "5筒", "7筒", "9筒", "3条", "4条", "6条", "6条", "7条", "9条"
     # ])
+    hand_tiles = create_test_tiles([
+        "1万", "1万", "6万", "3筒", "5筒", "1条", "1条", "1条", "4条", "5条", "6条"
+    ])
     player.hand_tiles = hand_tiles
+    player.missing_suit = "筒"
+    player.melds = [
+        Meld(MeldType.PENG, [Tile(TileType.WAN, 2), Tile(TileType.WAN, 2), Tile(TileType.WAN, 2)])
+    ]
     
     # 分析打牌效率
     efficiency_scores = TileEfficiencyAnalyzer.analyze_discard_efficiency(player, hand_tiles, use_peak_theory=True)
@@ -298,6 +306,102 @@ def run_performance_benchmark():
     print(f"AI决策性能: 平均 {avg_time:.3f} 毫秒/次")
     print()
 
+def test_tenpai_pattern_classification():
+    """测试听牌形态分类功能"""
+    print("🎯 测试听牌形态分类功能")
+    print("=" * 70)
+    
+    test_cases = [
+        # 单听（1张）测试
+        # 边张听
+        (["1万","2万","3万","4条","5条","6条","8万","9万","2筒","3筒","4筒","东","东"], 
+         {"(TileType.WAN, 7)": 4}, "penchan", "边张听-等7万"),
+        
+        # 嵌张听
+        (["1万","2万","3万","4条","6条","7万","8万","9万","1筒","2筒","3筒","发","发"], 
+         {"(TileType.TIAO, 5)": 4}, "kanchan", "嵌张听-等5条"),
+        
+        # 单钓将
+        (["1万","2万","3万","4万","5万","6万","7万","8万","9万","1筒","2筒","3筒","东"], 
+         {"(TileType.FENG, FengType.DONG)": 3}, "tanki", "单钓将-等东"),
+        
+        # 双听（2张）测试
+        # 两面听
+        (["1万","2万","3万","4条","5条","7万","8万","9万","1筒","2筒","3筒","白","白"], 
+         {"(TileType.TIAO, 3)": 4, "(TileType.TIAO, 6)": 4}, "ryanmen", "两面听-等3条和6条"),
+        
+        # 双碰听
+        (["1万","1万","2万","3万","4万","5万","6万","7万","7筒","8筒","9筒","东","东"], 
+         {"(TileType.WAN, 1)": 2, "(TileType.FENG, FengType.DONG)": 2}, "shanpon", "双碰听-等1万或东"),
+
+        # 双钓将
+        (["2万","3万","4万","5万","7万","8万","9万","7筒","8筒","9筒","东","东","东"], 
+         {"(TileType.WAN, 2)": 2, "(TileType.WAN, 5)": 2}, "shuangtiao", "双钓将-等2万或5万"),
+        
+        # 多面听测试
+        # 三面听
+        (["1条","2条","3条","4万","5万","6万","7万","8万","1筒","2筒","3筒","中","中"], 
+         {"(TileType.WAN, 3)": 4, "(TileType.WAN, 6)": 1, "(TileType.WAN, 9)": 3}, "sanmen", "三面听"),
+        # 四面听
+        (["1条","1条","1条","5万","6万","7万","7万","8万","8万","8万","1筒","2筒","3筒"], 
+         {"(TileType.WAN, 4)": 4, "(TileType.WAN, 6)": 3, "(TileType.WAN, 7)": 3,"(TileType.WAN, 9)": 3}, "duomin", "四面听"),
+
+        # 九莲宝灯
+        (["1万","1万","1万","2万","3万","4万","5万","6万","7万","8万","9万","9万","9万"], 
+         {"(TileType.WAN, 1)": 1, "(TileType.WAN, 2)": 1, "(TileType.WAN, 3)": 1, "(TileType.WAN, 4)": 1, "(TileType.WAN, 5)": 1, "(TileType.WAN, 6)": 1, "(TileType.WAN, 7)": 1, "(TileType.WAN, 8)": 1, "(TileType.WAN, 9)": 1}, "jiulian", "九莲宝灯"),
+
+        # 特殊牌型测试
+        # 十三幺听牌（理论上）
+        (["1万","9万","1筒","9筒","1条","9条","东","南","西","北","中","发","白"], 
+         {"(TileType.WAN, 1)": 1, "(TileType.WAN, 9)": 1, "(TileType.TONG, 1)": 1, "(TileType.TONG, 9)": 1, "(TileType.TIAO, 1)": 1, "(TileType.TIAO, 9)": 1, "(TileType.FENG, FengType.DONG)": 1, "(TileType.FENG, FengType.NAN)": 1, "(TileType.FENG, FengType.XI)": 1, "(TileType.FENG, FengType.BEI)": 1, "(TileType.ZI, ZiType.ZHONG)": 1, "(TileType.ZI, ZiType.FA)": 1, "(TileType.ZI, ZiType.BAI)": 1}, "kokushi", "十三幺13面听"),
+    ]
+    
+    print("测试听牌形态分类:")
+    print("-" * 70)
+    
+    for hand_str, expected_ukeire, expected_pattern, description in test_cases:
+        if expected_pattern == "kokushi":
+            print()
+        tiles = create_test_tiles(hand_str)
+        
+        # 验证是否为听牌状态
+        if expected_pattern == "kokushi":
+            shanten = ShantenCalculator.calculate_shanten(tiles, shentan_type="kokushi")
+        else:
+            shanten = ShantenCalculator.calculate_shanten(tiles)
+        if shanten != 0:
+            print(f"⚠️  {description} - 手牌不是听牌状态(向听数: {shanten})")
+            print(f"   手牌: {' '.join(str(t) for t in tiles)}")
+            continue
+        
+        # 计算实际进张
+        if expected_pattern == "kokushi":
+            ukeire = UkeireCalculator.calculate_ukeire(tiles, shentan_type="kokushi")
+        else:
+            ukeire = UkeireCalculator.calculate_ukeire(tiles)
+        
+        # 分类听牌形态
+        pattern = TileEfficiencyAnalyzer._classify_tenpai_pattern(tiles, ukeire)
+        
+        # 显示结果
+        status = "✅" if pattern == expected_pattern else "❌"
+        print(f"{status} {description}")
+        print(f"   手牌: {' '.join(str(t) for t in tiles)}")
+        print(f"   检测到的形态: {pattern}")
+        print(f"   期望形态: {expected_pattern}")
+        
+        if ukeire:
+            print(f"   进张详情: {len(ukeire)}种, 共{sum(ukeire.values())}张")
+            for (tile_type, value), count in list(ukeire.items()):  # 只显示前3种
+                if tile_type in [TileType.WAN, TileType.TONG, TileType.TIAO]:
+                    tile_name = f"{value}{tile_type.value}"
+                elif tile_type == TileType.FENG:
+                    tile_name = f"{value.value}"
+                else:
+                    tile_name = f"{value.value}"
+                print(f"      - {tile_name}: {count}张")
+        print()
+
 def main():
     """主测试函数"""
     print("🀄 ShantenAI 功能测试")
@@ -319,6 +423,9 @@ def main():
         # 性能测试
         run_performance_benchmark()
         
+        # 添加听牌分类测试
+        test_tenpai_pattern_classification()
+        
         print("🎉 所有测试完成！")
         print("=" * 80)
         print("ShantenAI已成功集成到麻将游戏系统中")
@@ -333,3 +440,5 @@ def main():
 if __name__ == "__main__":
     # main() 
     test_tile_efficiency_analysis()
+    # test_ukeire_calculation()
+    # test_tenpai_pattern_classification()

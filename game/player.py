@@ -115,9 +115,33 @@ class Player:
         return count >= 2
     
     def can_gang(self, tile: Tile) -> bool:
-        """是否可以杠"""
+        """是否可以杠（明杠）"""
         count = sum(1 for t in self.hand_tiles if t == tile)
         return count >= 3
+    
+    def can_hidden_gang(self, tile: Optional[Tile] = None) -> List[Tile]:
+        """检查是否可以暗杠，返回可暗杠的牌列表"""
+        if tile:
+            # 检查特定牌是否可以暗杠
+            count = sum(1 for t in self.hand_tiles if str(t) == str(tile))
+            return [tile] if count >= 4 else []
+        
+        # 检查所有可以暗杠的牌
+        tile_counts = {}
+        for t in self.hand_tiles:
+            key = str(t)
+            tile_counts[key] = tile_counts.get(key, 0) + 1
+        
+        hidden_gang_tiles = []
+        for tile_str, count in tile_counts.items():
+            if count >= 4:
+                # 找到对应的牌对象
+                for t in self.hand_tiles:
+                    if str(t) == tile_str:
+                        hidden_gang_tiles.append(t)
+                        break
+        
+        return hidden_gang_tiles
     
     def can_chi(self, tile: Tile) -> List[List[Tile]]:
         """是否可以吃，返回可能的组合"""
@@ -180,7 +204,7 @@ class Player:
         return True
     
     def make_gang(self, tile: Tile, hidden: bool = False) -> bool:
-        """执行杠"""
+        """执行杠（明杠）"""
         if not self.can_gang(tile):
             return False
         
@@ -196,6 +220,30 @@ class Player:
         # 添加到组合中
         self.melds.append(Meld(MeldType.GANG, gang_tiles, exposed=not hidden))
         return True
+    
+    def make_hidden_gang(self, tile: Tile) -> bool:
+        """执行暗杠"""
+        if not self.can_hidden_gang(tile):
+            return False
+        
+        # 从手牌中移除四张相同的牌
+        gang_tiles = []
+        removed_count = 0
+        for t in self.hand_tiles[:]:
+            if str(t) == str(tile) and removed_count < 4:
+                self.hand_tiles.remove(t)
+                gang_tiles.append(t)
+                removed_count += 1
+        
+        if len(gang_tiles) == 4:
+            # 添加到组合中，暗杠不展示
+            self.melds.append(Meld(MeldType.GANG, gang_tiles, exposed=False))
+            return True
+        else:
+            # 如果移除失败，恢复手牌
+            self.hand_tiles.extend(gang_tiles)
+            self.sort_hand()
+            return False
     
     def make_chi(self, tiles: List[Tile]) -> bool:
         """执行吃"""

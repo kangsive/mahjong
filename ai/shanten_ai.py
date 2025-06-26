@@ -133,47 +133,100 @@ class ShantenCalculator:
     
     @staticmethod
     def _get_suit_combinations(suit_counts: List[int]) -> List[Tuple[int, int, int]]:
-        """获取单个花色的所有可能组合"""
-        # 简化版本：只返回贪心算法结果
-        counts = suit_counts[:]
-        melds = 0
-        tatsu = 0
-        pairs = 0
+        """
+        获取单个花色的所有可能组合
         
-        # 优先处理刻子
+        使用递归回溯算法枚举所有可能的面子、搭子、对子组合
+        返回 (面子数, 搭子数, 对子数) 的所有可能组合
+        """
+        if not suit_counts or len(suit_counts) != 9:
+            return [(0, 0, 0)]
+        
+        # 如果所有牌都是0，返回空组合
+        if all(count == 0 for count in suit_counts):
+            return [(0, 0, 0)]
+        
+        results = []
+        ShantenCalculator._enumerate_combinations(suit_counts[:], 0, 0, 0, results)
+        
+        # 去重并返回
+        unique_results = list(set(results))
+        return unique_results if unique_results else [(0, 0, 0)]
+    
+    @staticmethod
+    def _enumerate_combinations(
+        counts: List[int], 
+        melds: int, 
+        tatsu: int, 
+        pairs: int, 
+        results: List[Tuple[int, int, int]]
+    ):
+        """
+        递归枚举所有可能的组合
+        
+        Args:
+            counts: 当前各位置的牌数
+            melds: 已形成的面子数
+            tatsu: 已形成的搭子数  
+            pairs: 已形成的对子数
+            results: 结果列表
+        """
+        # 寻找第一个非零位置
+        pos = -1
         for i in range(9):
-            if counts[i] >= 3:
-                melds += counts[i] // 3
-                counts[i] %= 3
+            if counts[i] > 0:
+                pos = i
+                break
         
-        # 处理顺子
-        for i in range(7):
-            while counts[i] > 0 and counts[i+1] > 0 and counts[i+2] > 0:
-                counts[i] -= 1
-                counts[i+1] -= 1
-                counts[i+2] -= 1
-                melds += 1
+        # 如果没有牌了，记录当前组合
+        if pos == -1:
+            results.append((melds, tatsu, pairs))
+            return
         
-        # 处理对子和搭子
-        for i in range(9):
-            if counts[i] >= 2:
-                pairs += 1
-                counts[i] -= 2
+        # 尝试所有可能的处理方式
         
-        # 处理搭子
-        for i in range(8):
-            if counts[i] > 0 and counts[i+1] > 0:
-                tatsu += 1
-                counts[i] -= 1
-                counts[i+1] -= 1
+        # 1. 尝试形成刻子（如果有3张或以上）
+        if counts[pos] >= 3:
+            counts[pos] -= 3
+            ShantenCalculator._enumerate_combinations(counts, melds + 1, tatsu, pairs, results)
+            counts[pos] += 3
         
-        for i in range(7):
-            if counts[i] > 0 and counts[i+2] > 0:
-                tatsu += 1
-                counts[i] -= 1
-                counts[i+2] -= 1
+        # 2. 尝试形成顺子（如果可能）
+        if pos <= 6 and counts[pos] > 0 and counts[pos + 1] > 0 and counts[pos + 2] > 0:
+            counts[pos] -= 1
+            counts[pos + 1] -= 1
+            counts[pos + 2] -= 1
+            ShantenCalculator._enumerate_combinations(counts, melds + 1, tatsu, pairs, results)
+            counts[pos] += 1
+            counts[pos + 1] += 1
+            counts[pos + 2] += 1
         
-        return [(melds, tatsu, pairs)]
+        # 3. 尝试形成对子（如果有2张或以上）
+        if counts[pos] >= 2:
+            counts[pos] -= 2
+            ShantenCalculator._enumerate_combinations(counts, melds, tatsu, pairs + 1, results)
+            counts[pos] += 2
+        
+        # 4. 尝试形成两面搭子（如果可能）
+        if pos <= 7 and counts[pos] > 0 and counts[pos + 1] > 0:
+            counts[pos] -= 1
+            counts[pos + 1] -= 1
+            ShantenCalculator._enumerate_combinations(counts, melds, tatsu + 1, pairs, results)
+            counts[pos] += 1
+            counts[pos + 1] += 1
+        
+        # 5. 尝试形成嵌张搭子（如果可能）
+        if pos <= 6 and counts[pos] > 0 and counts[pos + 2] > 0:
+            counts[pos] -= 1
+            counts[pos + 2] -= 1
+            ShantenCalculator._enumerate_combinations(counts, melds, tatsu + 1, pairs, results)
+            counts[pos] += 1
+            counts[pos + 2] += 1
+        
+        # 6. 跳过当前牌（作为孤张处理）
+        counts[pos] -= 1
+        ShantenCalculator._enumerate_combinations(counts, melds, tatsu, pairs, results)
+        counts[pos] += 1
     
     @staticmethod
     def _calc_shanten_from_groups(melds: int, tatsu: int, pairs: int) -> int:
@@ -245,8 +298,6 @@ class ShantenCalculator:
                 return -1
             shanten = 12 - kokushi_types_count
         else:
-            if kokushi_types_count == 13:
-                return -1
             shanten = 13 - kokushi_types_count
         
         return max(0, shanten)
@@ -277,7 +328,7 @@ class UkeireCalculator:
         if discard_pool is None:
             discard_pool = []
         
-        current_shanten = ShantenCalculator.calculate_shanten(tiles, melds_count)
+        current_shanten = ShantenCalculator.calculate_shanten(tiles, melds_count, shentan_type=shentan_type)
         
         # 统计已经出现的牌
         used_tiles = Counter()
@@ -304,6 +355,8 @@ class UkeireCalculator:
             
             for value in values:
                 key = (tile_type, value)
+                # if tile_type == TileType.WAN and value == 9:
+                #     print()
                 
                 # 检查是否是缺门牌
                 if missing_suit and UkeireCalculator._is_missing_suit_tile(tile_type, missing_suit):
@@ -471,43 +524,43 @@ class TileEfficiencyAnalyzer:
         """
         if not efficiency_scores:
             return efficiency_scores
-        
+
         # 获取当前向听数
         current_shanten = ShantenCalculator.calculate_shanten(
             player.hand_tiles, len(player.melds), shentan_type=shentan_type
         )
-        
+
         # 只在二向听和一向听时应用顶峰理论
         if current_shanten > 2:
             return efficiency_scores
-        
+
         # 找出top3候选牌
         sorted_tiles = sorted(efficiency_scores.items(), key=lambda x: x[1][0], reverse=True)
         top3_tiles = sorted_tiles[:3]
-        
+
         if len(top3_tiles) <= 1:
             return efficiency_scores
-        
+
         # 检查top1是否有并列情况
         top_score = top3_tiles[0][1][0]
         tied_top_tiles = [tile for tile, score in top3_tiles if abs(score[0] - top_score) < 0.1]
-        
+
         if len(tied_top_tiles) <= 1:
             # 没有并列，直接返回
             return efficiency_scores
-        
+
         # 有并列情况，应用顶峰理论重新排序
         enhanced_scores = efficiency_scores.copy()
-        
+
         for tile, original_score in top3_tiles:
             # 计算顶峰理论加分
             peak_bonus = TileEfficiencyAnalyzer._calculate_peak_theory_bonus(
                 tile, player, discard_pool, current_shanten, shentan_type, ukeire
             )
-            
+
             # 只增不减
             enhanced_scores[tile] = (original_score[0] + peak_bonus, original_score[1])
-        
+
         return enhanced_scores
 
     @staticmethod
@@ -530,19 +583,19 @@ class TileEfficiencyAnalyzer:
         """
         if current_shanten > 2:
             return 0.0
-        
+
         # 模拟打出这张牌后的手牌
         remaining_tiles = player.hand_tiles.copy()
         remaining_tiles.remove(discard_tile)
-        
+
         after_shanten = ShantenCalculator.calculate_shanten(
             remaining_tiles, len(player.melds), shentan_type=shentan_type
         )
-        
+
         # 如果打出后向听数变差，不给加分
         if after_shanten > current_shanten:
             return 0.0
-        
+
         # 计算所有可能的进张
         if ukeire is None:
             ukeire = UkeireCalculator.calculate_ukeire(
@@ -551,15 +604,15 @@ class TileEfficiencyAnalyzer:
                 discard_pool, 
                 shentan_type=shentan_type
             )
-        
+
         if not ukeire:
             return 0.0
-        
+
         # 分析每种进张后的听牌形态
         waiting_patterns = TileEfficiencyAnalyzer._analyze_waiting_patterns(
             remaining_tiles, ukeire, player, shentan_type, discard_pool
         )
-        
+
         # 计算顶峰理论加分
         peak_bonus = 0.0
 
@@ -588,21 +641,21 @@ class TileEfficiencyAnalyzer:
             # 1. 两面听奖励 - 优先形成两面听
             ryanmen_wait_patterns = waiting_patterns.get('ryanmen_wait_count', 0)
             peak_bonus += ryanmen_wait_patterns * 8.0
-            
+
             # 2. 高进张数奖励 - 听牌后进张数越多越好
             avg_final_ukeire = waiting_patterns.get('avg_final_ukeire', 0)
             peak_bonus += avg_final_ukeire * 1.5
-            
+
             # 3. 听牌类型多样性奖励 - 能形成多种不同听牌形态
             pattern_diversity = waiting_patterns.get('pattern_diversity', 0)
             peak_bonus += pattern_diversity * 5.0
-            
+
             # 4. 避免单调听牌的惩罚转换为奖励
             single_wait_penalty = waiting_patterns.get('single_wait_count', 0)
             if waiting_patterns.get('total_patterns', 1) > 0:
                 single_wait_ratio = single_wait_penalty / waiting_patterns['total_patterns']
                 peak_bonus -= single_wait_ratio * 5.0  # 单调听太多会减分
-        
+
         return max(0.0, peak_bonus)
 
     @staticmethod
@@ -625,30 +678,33 @@ class TileEfficiencyAnalyzer:
             'pattern_diversity': 0,  # 听牌类型多样性
             'avg_final_ukeire': 0.0  # 平均最终进张数
         }
-        
+
         if not ukeire:
             return patterns
-        
+
         total_final_ukeire = 0
         one_shanten_types = dict()
         tenpai_types = set()
-        
+
         # 枚举每种可能的进张
         for tile_key, count in ukeire.items():
             # 模拟摸到这张牌
             test_tile = UkeireCalculator._create_tile_from_key(tile_key)
             test_tiles = remaining_tiles + [test_tile]
-            
+
             # 检查是否听牌
             test_shanten = ShantenCalculator.calculate_shanten(
                 test_tiles, len(player.melds), shentan_type=shentan_type
             )
-            
+
             if test_shanten <= 1:  # 接近听牌或已听牌
                 # test_tiles现在是14张（摸进后），需要找出最优打牌变成13张听牌
                 final_waiting_state = TileEfficiencyAnalyzer._find_optimal_waiting_state(
                     test_tiles, player, shentan_type, discard_pool
                 )
+
+                if final_waiting_state is None:
+                    pass
 
                 if test_shanten == 1:
                     one_shanten_pattern = TileEfficiencyAnalyzer._classify_1shanten_pattern(
@@ -657,10 +713,10 @@ class TileEfficiencyAnalyzer:
                     one_shanten_types[tile_key] = one_shanten_pattern
                     patterns['one_shanten_types'] = one_shanten_types
 
-                elif final_waiting_state: # 否则听牌状态
+                elif final_waiting_state and test_shanten == 0: # 否则听牌状态
                     final_tiles, final_ukeire = final_waiting_state
                     final_count = sum(final_ukeire.values())
-                    
+
                     # 分析听牌类型
                     tenpai_type = TileEfficiencyAnalyzer._classify_tenpai_pattern(
                         final_tiles, final_ukeire
@@ -668,7 +724,7 @@ class TileEfficiencyAnalyzer:
                     tenpai_types.add(tenpai_type)
 
                     total_final_ukeire += final_count * count
-                    
+
                     # 统计多面听和单调听
                     if final_count > 1:  # 多面听
                         patterns['ryanmen_wait_count'] += count
@@ -693,29 +749,28 @@ class TileEfficiencyAnalyzer:
         找出14张手牌的最优听牌状态
         
         逻辑：
-        1. 对14张手牌进行打牌效率分析（不使用顶峰理论避免递归）
+        1. 对手牌进行打牌效率分析（不使用顶峰理论）
         2. 选择效率最高的打牌
-        3. 打出后变成13张，计算最终听牌进张
         
         Returns:
-            (最终13张听牌手牌, 最终进张字典) 或 None
+            (打出后的手牌, 最终进张字典)
         """
-        if len(tiles) != 14:
-            return None
-        
-        # 创建临时玩家对象来进行分析
+        # if len(tiles) != 14:
+        #     return None
+
+        # 创建临时玩家对象来进行分析, 因为我们模拟的是多模一张牌后(不是玩家真正的手牌现状)
         temp_player = Player(f"temp_{player.name}")
-        for tile in tiles:
-            temp_player.add_tile(tile)
-        
+        temp_player.hand_tiles = tiles
+
         # 继承缺门设置
         if hasattr(player, 'missing_suit'):
             temp_player.missing_suit = player.missing_suit
+            temp_player.melds = deepcopy(player.melds)
 
         efficiency_scores = TileEfficiencyAnalyzer.analyze_discard_efficiency(
             temp_player, tiles, discard_pool=discard_pool, shentan_type=shentan_type, use_peak_theory=False
         )
-        
+
         # 后者效率分数最高的牌
         sorted_tiles = sorted(efficiency_scores.items(), key=lambda x: x[1][0], reverse=True)
         discard_tile = sorted_tiles[0][0]
@@ -724,9 +779,9 @@ class TileEfficiencyAnalyzer:
         tiles.remove(discard_tile)
 
         best_final_state = (tiles, final_ukeire)
-        
+
         return best_final_state
-    
+
     # 判断一向听类型
     @staticmethod
     def _classify_1shanten_pattern(
@@ -748,7 +803,6 @@ class TileEfficiencyAnalyzer:
         ]
         return all_patterns[0]
 
-
     @staticmethod
     def _classify_tenpai_pattern(
         tiles: List[Tile], 
@@ -757,36 +811,193 @@ class TileEfficiencyAnalyzer:
         """
         分类听牌形态
         
-        返回听牌类型：
-        - 'ryanmen': 两面听 (两张连续牌的两端)
-        - 'kanchan': 嵌张听 (中间缺一张)  
-        - 'penchan': 边张听 (边缘听张)
-        - 'tanki': 单骑听 (等对子)
-        - 'shanpon': 双碰听 (等刻子)
+        根据可和牌的数量及牌型组合分类：
+        - 单听（1张）：'penchan'(边张)、'kanchan'(嵌张)、'tanki'(单钓将)
+        - 双听（2张）：'ryanmen'(两面听)、'shanpon'(双碰听)、'shuangtiao'(双钓将)
+        - 多面听（3张及以上）：'sanmen'(三面听)、'duomin'(多面听)
+        - 特殊听牌：'jiulian'(九莲宝灯)、'shisanyao'(十三幺)
         """
         waiting_count = len(final_ukeire)
+        total_waiting_tiles = sum(final_ukeire.values())
 
-        # 如果手牌数大于2，抛出异常
-        if waiting_count > 2:
-            raise ValueError(f"听牌状态下最多进张数为2，当前张数: {waiting_count}")
+        # 检查特殊牌型
+        special_pattern = TileEfficiencyAnalyzer._check_special_tenpai_patterns(tiles, final_ukeire)
+        if special_pattern:
+            return special_pattern
 
-        # 如果手牌中有搭子，分析是双面听还是嵌张听或者边张听
-        if not TileEfficiencyAnalyzer._is_single_tile(tiles):
-            # 如果waiting_counts是2，是双面听
-            if waiting_count == 2:
-                return 'ryanmen'
-            # 如果waiting_counts是1，分析final_ukeire是否为边张，否则为嵌张
-            elif next(iter(final_ukeire.keys())).value in [1, 9]:
-                    return 'penchan'
-            else:
+        # 根据进张数量分类
+        if waiting_count == 1:
+            # 单听（1张）
+            return TileEfficiencyAnalyzer._classify_single_wait(tiles, final_ukeire)
+        elif waiting_count == 2:
+            # 双听（2张）
+            return TileEfficiencyAnalyzer._classify_double_wait(tiles, final_ukeire)
+        elif waiting_count == 3:
+            # 三面听
+            return 'sanmen'
+        elif waiting_count >= 4:
+            # 多面听
+            return 'duomin'
+        else:
+            # 异常情况
+            return 'unknown'
+
+    @staticmethod
+    def _check_special_tenpai_patterns(
+        tiles: List[Tile], 
+        final_ukeire: Dict[Tuple[TileType, Union[int, FengType, JianType]], int]
+    ) -> Optional[str]:
+        """检查特殊听牌形态：九莲宝灯、十三幺等"""
+        tile_counts = ShantenCalculator._count_tiles(tiles)
+
+        # 检查十三幺听牌
+        # TODO: 跟向听国士无双（十三幺）的代码有重复
+        if TileEfficiencyAnalyzer._is_kokushi_tenpai(tiles, final_ukeire):
+            return 'kokushi'
+
+        # 检查九莲宝灯听牌
+        if TileEfficiencyAnalyzer._is_jiulian_tenpai(tiles, final_ukeire):
+            return 'jiulian'
+
+        return None
+
+    @staticmethod
+    def _is_kokushi_tenpai(
+        tiles: List[Tile], 
+        final_ukeire: Dict[Tuple[TileType, Union[int, FengType, JianType]], int]
+    ) -> bool:
+        """判断是否为十三幺听牌"""
+        # 十三幺的13种特定牌
+        kokushi_keys = {
+            (TileType.WAN, 1), (TileType.WAN, 9),
+            (TileType.TONG, 1), (TileType.TONG, 9),
+            (TileType.TIAO, 1), (TileType.TIAO, 9),
+            (TileType.FENG, FengType.DONG), (TileType.FENG, FengType.NAN),
+            (TileType.FENG, FengType.XI), (TileType.FENG, FengType.BEI),
+            (TileType.JIAN, JianType.ZHONG), (TileType.JIAN, JianType.FA),
+            (TileType.JIAN, JianType.BAI)
+        }
+
+        tile_counts = ShantenCalculator._count_tiles(tiles)
+
+        # 检查是否只包含十三幺牌型
+        for tile_key in tile_counts.keys():
+            if tile_key not in kokushi_keys:
+                return False
+
+        # 检查是否有12种不同的牌，其中一种是对子
+        unique_types = len(tile_counts)
+        pair_count = sum(1 for count in tile_counts.values() if count == 2)
+
+        return unique_types == 13 and pair_count == 0
+
+    @staticmethod
+    def _is_jiulian_tenpai(
+        tiles: List[Tile], 
+        final_ukeire: Dict[Tuple[TileType, Union[int, FengType, JianType]], int]
+    ) -> bool:
+        """判断是否为九莲宝灯听牌"""
+        # 九莲宝灯必须是清一色
+        tile_types = set(tile.tile_type for tile in tiles if tile.is_number_tile())
+        if len(tile_types) != 1:
+            return False
+
+        suit = list(tile_types)[0]
+        tile_counts = ShantenCalculator._count_tiles(tiles)
+
+        # 构建该花色的牌数分布
+        suit_distribution = [0] * 9
+        for (tile_type, value), count in tile_counts.items():
+            if tile_type == suit and 1 <= value <= 9:
+                suit_distribution[value - 1] = count
+
+        # 九莲宝灯的基本形态：1112345678999
+        expected = [3, 1, 1, 1, 1, 1, 1, 1, 3]
+
+        # 检查是否符合九莲基本形态（允许一张牌的差异）
+        differences = 0
+        for i in range(9):
+            if suit_distribution[i] != expected[i]:
+                differences += abs(suit_distribution[i] - expected[i])
+
+        # 如果只有一张牌的差异，可能是九莲听牌
+        return differences <= 2 and len(final_ukeire) >= 8
+
+    @staticmethod
+    def _classify_single_wait(
+        tiles: List[Tile], 
+        final_ukeire: Dict[Tuple[TileType, Union[int, FengType, JianType]], int]
+    ) -> str:
+        """分类单听形态"""
+        waiting_tile_key = list(final_ukeire.keys())[0]
+        tile_type, value = waiting_tile_key
+
+        # 如果等待的是字牌，通常是单钓将
+        if tile_type in [TileType.FENG, TileType.JIAN]:
+            return 'tanki'
+
+        # 分析数字牌的听牌类型
+        tile_counts = ShantenCalculator._count_tiles(tiles)
+
+        # 检查是否为边张听 1, 2 -> 3; 8, 9 -> 7
+        if value in [3, 7]:
+            return 'penchan'
+
+        # 检查是否为嵌张听
+        if 2 <= value <= 8:
+            # 检查是否有两边的搭子
+            left_exists = tile_counts.get((tile_type, value - 1), 0) > 0
+            right_exists = tile_counts.get((tile_type, value + 1), 0) > 0
+            if left_exists and right_exists:
                 return 'kanchan'
 
-        # 否则如果手牌中有两对，是双碰
-        elif TileEfficiencyAnalyzer._has_2_pairs(tiles):
-            return 'tanki'
-        else:
-            return 'shanpon' # 否则是单骑
+        # 默认为单钓将
+        return 'tanki'
 
+    @staticmethod
+    def _classify_double_wait(
+        tiles: List[Tile], 
+        final_ukeire: Dict[Tuple[TileType, Union[int, FengType, JianType]], int]
+    ) -> str:
+        """分类双听形态"""
+        waiting_keys = list(final_ukeire.keys())
+
+        # 如果其中有一个字牌，可能是双碰听（未验证）
+        if any(key[0] in [TileType.FENG, TileType.JIAN] for key in waiting_keys):
+            return 'shanpon'
+
+        tile_counts = ShantenCalculator._count_tiles(tiles)
+
+        # 如果都是同一花色的数字牌
+        if len(set(key[0] for key in waiting_keys)) == 1 and waiting_keys[0][0] in [TileType.WAN, TileType.TONG, TileType.TIAO]:
+            tile_type = waiting_keys[0][0]
+            values = [key[1] for key in waiting_keys]
+            values.sort()
+
+            # 检查是否为两面听（相邻的两张牌）
+            if len(values) == 2:
+                if values[1] - values[0] == 3:
+                    # 如听36，可能是两面听 (45->36)，也可能是双钓将(3456->3,6)
+                    # 下列算法并未十分准确，但可以大致判断（未验证）
+                    if (
+                        tile_counts.get((tile_type, values[0]), 0) >= 1
+                        and tile_counts.get((tile_type, values[1]), 0) >= 1
+                    ):
+                        return 'shuangtiao'
+                    else:
+                        return 'ryanmen'
+                else:
+                    # 检查是否为双碰听（两对等任一对成刻）（未验证）
+                    if (
+                        tile_counts.get((tile_type, values[0]), 0) >= 2
+                        and tile_counts.get((tile_type, values[1]), 0) >= 2
+                    ):
+                        return 'shanpon'
+
+        # 默认分类
+        return 'ryanmen'
+
+    @staticmethod
     def _is_single_tile(tiles: List[Tile]) -> bool:
         """
         判断手牌是否有单张
@@ -796,7 +1007,8 @@ class TileEfficiencyAnalyzer:
             if value == 1:
                 return True
         return False
-    
+
+    @staticmethod
     def _has_2_pairs(tiles: List[Tile]) -> bool:
         """
         判断手牌是否有2对
@@ -985,16 +1197,29 @@ class ShantenAI(BaseAI):
         )
         
         # 按效率排序
-        sorted_tiles = sorted(efficiency_scores.items(), key=lambda x: x[1], reverse=True)
+        sorted_tiles = sorted(efficiency_scores.items(), key=lambda x: x[1][0], reverse=True)
+
+        # 调试用
+        print("打牌效率分析 (分数越高越应该打出):")
+        for i, (tile, (score, ukeire)) in enumerate(sorted_tiles[:3]):
+            print(f"   {i+1}. {tile}: {score:.2f}分, {sum(ukeire.values())}张进张")
+        print()
         
         # 根据难度和准确率选择
         if random.random() < self.calculation_accuracy:
             # 选择最优解
-            return sorted_tiles[0][0]
+            chosen_tile = sorted_tiles[0][0]
+            print(f"最优选择出的牌: {chosen_tile}")
+            return chosen_tile
         else:
             # 添加一些随机性
             top_choices = sorted_tiles[:min(3, len(sorted_tiles))]
-            return random.choice(top_choices)[0]
+            chosen_entry = random.choice(top_choices)
+            chosen_tile = chosen_entry[0]
+            print(f"随机选择出的牌: {chosen_tile}")
+            return chosen_tile
+        
+        
     
     def decide_action(self, player: Player, available_actions: List[GameAction], 
                      context: Dict) -> Optional[GameAction]:
@@ -1037,16 +1262,14 @@ class ShantenAI(BaseAI):
         value = 0.0
         
         if action == GameAction.PENG:
-            # 碰牌减少向听数
+            # TODO - 如果碰牌减少向听数，则无奖励或者减分
             value += 20.0
-            # 但可能降低牌效率
-            value -= 5.0
         elif action == GameAction.GANG:
-            # 杠牌获得额外摸牌机会
-            value += 25.0
+            # 杠牌获得额外摸牌机会，在川麻里还有能获得一番
+            value += 50.0
             # 但有一定风险
             if current_shanten <= 1:
-                value -= 10.0  # 听牌时杠牌有风险
+                value -= 20.0  # 1向听牌时杠牌有风险
         elif action == GameAction.CHI:
             # 四川麻将不能吃牌
             value = -100.0
@@ -1085,6 +1308,7 @@ class ShantenAI(BaseAI):
         """选择换牌 - 基于牌效率优化"""
         if count > len(player.hand_tiles):
             return player.hand_tiles[:count]
+        # TODO - 应该考虑该花色所有三张组合，并计算去掉这三张后的牌效率，选择效率最高的组合
         
         # 计算每张牌的保留价值
         tile_values = {}
@@ -1187,6 +1411,8 @@ class ShantenAI(BaseAI):
         discard_pool = game_context.get('discard_pool', [])
         all_visible_tiles = game_context.get('all_visible_tiles', [])
         round_number = game_context.get('round_number', 1)
+
+        # TODO - 与牌效率的某些方法/代码重合，需要合并
         
         # 检查是否为现物
         for discarded_tile, _ in discard_pool:

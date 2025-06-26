@@ -56,33 +56,23 @@ class SichuanRule(BaseRule):
         # 计算已有的面子数量
         existing_melds_count = len(player.melds)
         
-        # 加上已经组合的牌来检查总牌数
-        all_tiles = test_tiles[:]
-        for meld in player.melds:
-            all_tiles.extend(meld.tiles)
-        
-        # 检查牌数是否正确（14张）
-        # 自摸时new_tile为None，但手牌中已包含新摸的牌，所以总数应该是14张
-        # 点炮时new_tile不为None，加入后总数也应该是14张
-        if len(all_tiles) != 14:
-            return False
-        
         # 检查是否为七对子（只在没有melds时适用）
-        if existing_melds_count == 0 and self._is_seven_pairs(all_tiles):
-            return True
+        if existing_melds_count == 0:
+            # 七对子需要14张牌（7对）
+            all_tiles = test_tiles[:]
+            for meld in player.melds:
+                all_tiles.extend(meld.tiles)
+            if len(all_tiles) == 14 and self._is_seven_pairs(all_tiles):
+                return True
         
-        # 检查基本胡牌牌型，考虑已有的面子
+        # 检查基本胡牌牌型（4个面子+1个对子），考虑已有的面子
+        # 不需要检查总牌数，只需要检查面子+对子结构
         return self._check_win_pattern_with_melds(test_tiles, existing_melds_count)
     
     def _check_missing_suit(self, player: Player) -> bool:
         """检查是否满足缺一门条件"""
         if not hasattr(player, 'missing_suit') or not player.missing_suit:
             return False
-        
-        # 收集所有牌（手牌+已组合的牌）
-        all_tiles = player.hand_tiles[:]
-        for meld in player.melds:
-            all_tiles.extend(meld.tiles)
         
         # 检查是否真的缺少该门
         missing_suit_type = {
@@ -94,9 +84,18 @@ class SichuanRule(BaseRule):
         if not missing_suit_type:
             return False
         
-        # 确保没有缺门的牌
-        has_missing_suit = any(tile.tile_type == missing_suit_type for tile in all_tiles)
-        return not has_missing_suit
+        # 检查手牌中是否有缺门的牌
+        has_missing_suit_in_hand = any(tile.tile_type == missing_suit_type for tile in player.hand_tiles)
+        
+        # 检查已组合的牌中是否有缺门的牌
+        has_missing_suit_in_melds = False
+        for meld in player.melds:
+            if any(tile.tile_type == missing_suit_type for tile in meld.tiles):
+                has_missing_suit_in_melds = True
+                break
+        
+        # 只有手牌和组合中都没有缺门的牌才满足缺门条件
+        return not (has_missing_suit_in_hand or has_missing_suit_in_melds)
     
     def _check_basic_win_pattern(self, tiles: List[Tile]) -> bool:
         """检查基本胡牌牌型（4个面子+1个对子）"""

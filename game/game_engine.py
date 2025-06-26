@@ -33,7 +33,7 @@ class GameAction(Enum):
     """游戏动作"""
     DISCARD = "discard"
     PENG = "peng"
-    GANG = "gang"
+    GANG = "gang"  # 包含明杠和暗杠
     CHI = "chi"
     WIN = "win"
     PASS = "pass"
@@ -461,9 +461,17 @@ class GameEngine:
                     player.can_peng(self.last_discarded_tile))
         
         elif action == GameAction.GANG:
-            return (player != self.last_discard_player and
-                    self.last_discarded_tile and
-                    player.can_gang(self.last_discarded_tile))
+            # 明杠：响应其他玩家的出牌
+            if (player != self.last_discard_player and
+                self.last_discarded_tile and
+                player.can_gang(self.last_discarded_tile)):
+                return True
+            # 暗杠：当前玩家的回合，可以杠自己手中的四张相同牌
+            if (player == self.get_current_player() and 
+                self.state == GameState.PLAYING and
+                len(player.can_hidden_gang()) > 0):
+                return True
+            return False
         
         elif action == GameAction.CHI:
             return (player != self.last_discard_player and
@@ -499,7 +507,7 @@ class GameEngine:
             return self._execute_peng(player)
         
         elif action == GameAction.GANG:
-            return self._execute_gang(player)
+            return self._execute_gang(player, tile)
         
         elif action == GameAction.CHI:
             chi_tiles = extra_data.get("chi_tiles", []) if extra_data else []
@@ -546,6 +554,10 @@ class GameEngine:
         for i, player in enumerate(self.players):
             if player == discard_player:
                 continue
+            
+            # 血战到底：只检查活跃玩家的响应
+            if hasattr(self, 'active_players') and i not in self.active_players:
+                continue
                 
             actions = []
             
@@ -576,9 +588,13 @@ class GameEngine:
             return False
         
         if player.make_peng(self.last_discarded_tile):
+            # 从公共出牌池中移除被碰的牌
+            self._remove_tile_from_discard_pool(self.last_discarded_tile)
+            
             self.current_player_index = player.position
             self.last_discarded_tile = None
             self.last_discard_player = None
+            self.last_drawn_tile = None  # 碰牌不涉及摸牌，清空摸牌状态
             
             # 检查碰牌后是否可以胡牌
             if self.rule and self.rule.can_win(player):
@@ -593,48 +609,79 @@ class GameEngine:
         
         return False
     
-    def _execute_gang(self, player: Player) -> bool:
-        """执行杠牌"""
-        if not self.last_discarded_tile:
+    def _execute_gang(self, player: Player, tile: Optional[Tile] = None) -> bool:
+        """执行杠牌（包含明杠和暗杠）"""
+        is_hidden_gang = False
+        gang_tile = None
+        
+        # 判断是明杠还是暗杠
+        if self.last_discarded_tile and player != self.last_discard_player:
+            # 明杠：响应其他玩家的出牌
+            gang_tile = self.last_discarded_tile
+            is_hidden_gang = False
+        elif tile and player == self.get_current_player():
+            # 暗杠：当前玩家的回合，杠自己手中的四张相同牌
+            hidden_gang_tiles = player.can_hidden_gang(tile)
+            if not hidden_gang_tiles:  # 如果返回空列表，说明不能暗杠
+                return False
+            gang_tile = tile
+            is_hidden_gang = True
+        else:
             return False
         
-        if player.make_gang(self.last_discarded_tile):
-            # 检查是否流局（杠牌后需要摸牌）
-            if not self.deck or self.deck.get_remaining_count() <= 0:
-                self.logger.info("杠牌后无牌可摸，游戏流局")
-                self._handle_draw_game()
-                return True
-            
-            # 杠牌后需要补牌
-            new_tile = self.deck.draw_tile()
-            if new_tile:
-                player.add_tile(new_tile)
-                self.last_drawn_tile = new_tile  # 记录摸到的牌
-                if player.player_type == PlayerType.HUMAN:
-                    self.logger.info(f"{player.name} 杠牌后摸了一张牌: {new_tile}")
-                else:
-                    self.logger.info(f"{player.name} 杠牌后摸了一张牌")
-            else:
-                self.logger.warning("杠牌后摸牌失败")
-                self._handle_draw_game()
-                return True
-            
-            self.current_player_index = player.position
-            self.last_discarded_tile = None
-            self.last_discard_player = None
-            
-            # 检查杠牌后是否可以胡牌
-            if self.rule and self.rule.can_win(player):
-                player.can_win = True
-                self.logger.info(f"{player.name} 杠牌后可以胡牌")
-            
-            # 杠牌后转换为正常游戏状态，让杠牌玩家继续出牌
-            self.state = GameState.PLAYING
-            
-            self._notify_player_action(player, GameAction.GANG, self.last_discarded_tile)
+        # 执行杠牌操作
+        if is_hidden_gang:
+            success = player.make_hidden_gang(gang_tile)
+        else:
+            success = player.make_gang(gang_tile)
+        
+        if not success:
+            return False
+        
+        # 明杠需要从公共出牌池中移除被杠的牌
+        if not is_hidden_gang:
+            self._remove_tile_from_discard_pool(gang_tile)
+        
+        # 检查是否流局（杠牌后需要摸牌）
+        if not self.deck or self.deck.get_remaining_count() <= 0:
+            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            self.logger.info(f"{gang_type}后无牌可摸，游戏流局")
+            self._handle_draw_game()
             return True
         
-        return False
+        # 杠牌后需要补牌
+        new_tile = self.deck.draw_tile()
+        if new_tile:
+            player.add_tile(new_tile)
+            self.last_drawn_tile = new_tile  # 记录摸到的牌
+            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            if player.player_type == PlayerType.HUMAN:
+                self.logger.info(f"{player.name} {gang_type}后摸了一张牌: {new_tile}")
+            else:
+                self.logger.info(f"{player.name} {gang_type}后摸了一张牌")
+        else:
+            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            self.logger.warning(f"{gang_type}后摸牌失败")
+            self._handle_draw_game()
+            return True
+        
+        self.current_player_index = player.position
+        self.last_discarded_tile = None
+        self.last_discard_player = None
+        
+        # 检查杠牌后是否可以胡牌
+        if self.rule and self.rule.can_win(player):
+            player.can_win = True
+            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            self.logger.info(f"{player.name} {gang_type}后可以胡牌")
+        
+        # 杠牌后转换为正常游戏状态，让杠牌玩家继续出牌
+        self.state = GameState.PLAYING
+        
+        # 通知动作，传递是否为暗杠的信息
+        action_data = {"tile": gang_tile, "is_hidden": is_hidden_gang}
+        self._notify_player_action(player, GameAction.GANG, action_data)
+        return True
     
     def _execute_chi(self, player: Player, chi_tiles: List[Tile]) -> bool:
         """执行吃牌"""
@@ -642,9 +689,14 @@ class GameEngine:
             return False
         
         if player.make_chi(chi_tiles):
+            # 从公共出牌池中移除被吃的牌（第一张牌，即其他玩家打出的牌）
+            if self.last_discarded_tile and self.last_discarded_tile in chi_tiles:
+                self._remove_tile_from_discard_pool(self.last_discarded_tile)
+            
             self.current_player_index = player.position
             self.last_discarded_tile = None
             self.last_discard_player = None
+            self.last_drawn_tile = None  # 吃牌不涉及摸牌，清空摸牌状态
             
             # 吃牌后转换为正常游戏状态，让吃牌玩家继续出牌
             self.state = GameState.PLAYING
@@ -663,11 +715,24 @@ class GameEngine:
         win_tile = None if is_self_draw else self.last_discarded_tile
         
         if self.rule.can_win(player, win_tile):
-            player.is_winner = True
-            self.state = GameState.GAME_OVER
+            # 如果是点炮胡牌，需要将胡牌加入手牌中进行最终检查
+            if not is_self_draw and self.last_discarded_tile:
+                # 从公共出牌池中移除被胡的牌
+                self._remove_tile_from_discard_pool(self.last_discarded_tile)
+                # 将胡牌加入手牌（用于最终的牌型检查和显示）
+                player.add_tile_to_hand(self.last_discarded_tile)
             
-            # 记录胜者信息
-            winners = [player.position]
+            player.is_winner = True
+            player_id = player.position
+            
+            # 记录胜者信息 - 血战到底：累积记录胜者
+            if player_id not in self.winners:
+                self.winners.append(player_id)
+            
+            # 从活跃玩家中移除该玩家
+            if player_id in self.active_players:
+                self.active_players.remove(player_id)
+            
             winner_tile = self.last_drawn_tile if is_self_draw else self.last_discarded_tile
             
             # 检查是否有其他玩家也能胡这张牌（一炮多响，只有点炮时才可能）
@@ -676,11 +741,14 @@ class GameEngine:
                     if (other_player != player and 
                         other_player != self.last_discard_player and
                         self.rule.can_win(other_player, self.last_discarded_tile)):
+                        # 其他玩家也能胡，也将胡牌加入其手牌
+                        other_player.add_tile_to_hand(self.last_discarded_tile)
                         other_player.is_winner = True
-                        winners.append(other_player.position)
-            
-            # 记录游戏结果用于下局决定庄家
-            self._record_game_result(winners, winner_tile)
+                        other_id = other_player.position
+                        if other_id not in self.winners:
+                            self.winners.append(other_id)
+                        if other_id in self.active_players:
+                            self.active_players.remove(other_id)
             
             # 计算得分，传递正确的自摸标志和放炮者信息
             scores = self.rule.calculate_score(
@@ -701,9 +769,50 @@ class GameEngine:
             
             # 记录胡牌类型用于显示
             win_type = "自摸" if is_self_draw else "点炮胡"
-            self.logger.info(f"{player.name} {win_type}胡牌！胡牌: {winner_tile}")
+            current_rank = len(self.winners)
+            rank_names = ["", "第一名", "第二名", "第三名", "第四名"]
+            rank_name = rank_names[current_rank] if current_rank < len(rank_names) else f"第{current_rank}名"
             
-            self._notify_game_over(player, scores, is_self_draw, winner_tile)
+            self.logger.info(f"{player.name} {win_type}胡牌！获得{rank_name}！胡牌: {winner_tile}")
+            
+            # 血战到底：检查游戏是否结束
+            if len(self.active_players) <= 1:
+                # 游戏结束：只剩1个或更少活跃玩家
+                self.state = GameState.GAME_OVER
+                
+                # 如果还有1个活跃玩家，他自动成为最后一名
+                if len(self.active_players) == 1:
+                    last_player_id = self.active_players[0]
+                    last_player = self.players[last_player_id]
+                    if last_player_id not in self.winners:
+                        self.winners.append(last_player_id)
+                        last_player.losses += 1
+                        last_rank = len(self.winners)
+                        last_rank_name = rank_names[last_rank] if last_rank < len(rank_names) else f"第{last_rank}名"
+                        self.logger.info(f"{last_player.name} 获得{last_rank_name}")
+                    self.active_players.remove(last_player_id)
+                
+                # 记录游戏结果用于下局决定庄家
+                self._record_game_result(self.winners, winner_tile)
+                
+                self._notify_game_over(player, scores, is_self_draw, winner_tile)
+                
+                self.logger.info(f"血战到底结束！最终排名: {[self.players[i].name for i in self.winners]}")
+            else:
+                # 游戏继续：血战到底
+                remaining_count = len(self.active_players)
+                self.logger.info(f"血战到底继续，剩余{remaining_count}名玩家")
+                
+                # 血战到底：胡牌后从胡牌玩家的下一家开始继续游戏
+                # 先把当前索引定位到胡牌玩家，待下一步统一用 _next_player() 处理
+                self.current_player_index = player.position
+
+                # 重置为正常游戏状态，然后调用 _next_player()，
+                # 由该方法负责跳到下一个活跃玩家并完成摸牌流程
+                self.state = GameState.PLAYING
+
+                self._next_player()
+            
             return True
         
         return False
@@ -728,11 +837,38 @@ class GameEngine:
         # 进入下一个玩家的回合
         self._next_player()
     
+    def _skip_to_next_active_player(self):
+        """跳到下一个活跃玩家（血战到底专用）"""
+        max_attempts = len(self.players)
+        attempts = 0
+        
+        while attempts < max_attempts:
+            self.current_player_index = (self.current_player_index + 1) % len(self.players)
+            if self.current_player_index in self.active_players:
+                break
+            attempts += 1
+        
+        if attempts >= max_attempts:
+            self.logger.error("无法找到活跃玩家")
+            self._handle_draw_game()
+    
     def _next_player(self):
         """下一个玩家"""
-        # 切换到下一个玩家
-        self.current_player_index = (self.current_player_index + 1) % len(self.players)
+        # 切换到下一个活跃玩家（血战到底）
+        if len(self.active_players) > 1:
+            self._skip_to_next_active_player()
+        else:
+            # 游戏应该已经结束
+            self.logger.warning("活跃玩家不足，游戏应该已结束")
+            return
+        
         current_player = self.get_current_player()
+        
+        # 确保当前玩家是活跃的
+        if self.current_player_index not in self.active_players:
+            self.logger.error(f"当前玩家 {current_player.name} 不在活跃列表中")
+            self._skip_to_next_active_player()
+            current_player = self.get_current_player()
         
         self.logger.info(f"切换到下一个玩家: {current_player.name}")
         
@@ -827,6 +963,9 @@ class GameEngine:
     
     def is_game_over(self) -> bool:
         """游戏是否结束"""
+        # 血战到底：当活跃玩家数量 <= 1 时游戏结束
+        if hasattr(self, 'active_players') and len(self.active_players) <= 1:
+            return True
         return self.state == GameState.GAME_OVER
     
     def get_game_state(self) -> Dict[str, Any]:
@@ -925,4 +1064,17 @@ class GameEngine:
     
     def get_dealer(self) -> Player:
         """获取当前庄家"""
-        return self.players[self.dealer_index] 
+        return self.players[self.dealer_index]
+    
+    def _remove_tile_from_discard_pool(self, tile: Tile) -> bool:
+        """从公共出牌池中移除指定的牌"""
+        for i, (pool_tile, player_name) in enumerate(self.discard_pool):
+            if (pool_tile.tile_type == tile.tile_type and 
+                pool_tile.value == tile.value and
+                pool_tile.feng_type == tile.feng_type and
+                pool_tile.jian_type == tile.jian_type):
+                # 找到匹配的牌，移除它
+                removed_tile, removed_player = self.discard_pool.pop(i)
+                self.logger.info(f"从出牌池移除: {removed_tile} (原打出者: {removed_player})")
+                return True
+        return False 

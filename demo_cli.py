@@ -61,9 +61,10 @@ from game.game_engine import GameEngine, GameMode, GameAction
 from game.player import PlayerType, Player
 from game.tile import Tile, format_mahjong_tiles
 from ai.trainer_ai import TrainerAI
+from ai.shanten_ai import ShantenAI
 from rules.sichuan_rule import SichuanRule
 import random
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 def set_terminal_font_size():
     """设置终端字体大小以便更好地显示麻将符号"""
@@ -167,8 +168,8 @@ def display_player_info(engine):
     
     for i, player in enumerate(engine.players):
         status = ""
-        # 使用 getattr 安全地访问 has_won 属性
-        if getattr(player, 'has_won', False):
+        # 使用 getattr 安全地访问 is_winner 属性
+        if getattr(player, 'is_winner', False):
             status = "🏆 已胡牌!"
         elif player.can_win:
             status = "🎉 听牌!"
@@ -176,7 +177,7 @@ def display_player_info(engine):
         print(f"\n{i+1}. {player.name} ({player.player_type.value}) {status}")
         
         # 已胡牌的玩家不再显示手牌数，只显示得分和组合
-        if getattr(player, 'has_won', False):
+        if getattr(player, 'is_winner', False):
             print(f"   得分: {player.score}")
             if player.melds:
                 print(f"   组合: {len(player.melds)}个")
@@ -189,9 +190,9 @@ def display_player_info(engine):
         print(f"   得分: {player.score}")
         
         # 临时调试：显示所有玩家的手牌
-        # if player.hand_tiles:
-        #     hand_str = " ".join(str(tile) for tile in player.hand_tiles)
-        #     print(f"   🃏 手牌: {hand_str}")
+        if player.hand_tiles:
+            hand_str = " ".join(str(tile) for tile in player.hand_tiles)
+            print(f"   🃏 手牌: {hand_str}")
         
         if player.missing_suit:
             print(f"   缺门: {player.missing_suit}")
@@ -274,6 +275,32 @@ def simulate_human_turn(engine: GameEngine):
         else:
             print(f"选择不胡牌，继续出牌")
 
+    # 检查是否可以暗杠
+    hidden_gang_tiles = human_player.can_hidden_gang()
+    if hidden_gang_tiles:
+        print(f"\n🔥 你可以暗杠！")
+        print("可暗杠的牌:")
+        for i, tile in enumerate(hidden_gang_tiles):
+            tile_display = format_large_mahjong_tile(tile, color_code="1;32")
+            print(f"  {i+1}. {tile_display}")
+        
+        choice = input("选择要暗杠的牌序号，或输入 'n' 跳过: ").strip().lower()
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(hidden_gang_tiles):
+                tile_to_gang = hidden_gang_tiles[idx]
+                success = engine.execute_player_action(human_player, GameAction.GANG, tile_to_gang)
+                if success:
+                    tile_display = format_large_mahjong_tile(tile_to_gang, color_code="1;32")
+                    print(f"✅ 成功暗杠 {tile_display}")
+                    return True
+                else:
+                    print(f"❌ 暗杠失败")
+            else:
+                print(f"序号无效")
+        elif choice != 'n':
+            print(f"输入无效，跳过暗杠")
+
     print(f"\n🎮 轮到{human_player.name}了! 请选择要打出的牌。")
 
     while True:
@@ -312,7 +339,7 @@ def simulate_ai_turn(engine: GameEngine):
     """模拟AI回合"""
     current_player = engine.get_current_player()
     
-    if not current_player or current_player.player_type == PlayerType.HUMAN or getattr(current_player, 'has_won', False):
+    if not current_player or current_player.player_type == PlayerType.HUMAN or getattr(current_player, 'is_winner', False):
         return False
     
     print(f"\n🤖 {current_player.name}思考中...")
@@ -329,7 +356,22 @@ def simulate_ai_turn(engine: GameEngine):
         else:
             print(f"❌ {current_player.name} 尝试自摸失败，继续出牌。")
 
-    # 2. 智能选择打牌
+    # 2. 检查暗杠，使用AI决策
+    hidden_gang_tiles = current_player.can_hidden_gang()
+    if hidden_gang_tiles:
+        # 使用AI算法决定是否暗杠
+        should_gang, tile_to_gang = decide_hidden_gang_ai(current_player, hidden_gang_tiles, engine)
+        if should_gang and tile_to_gang:
+            print(f"🔥 {current_player.name} 决定暗杠!")
+            success = engine.execute_player_action(current_player, GameAction.GANG, tile_to_gang)
+            if success:
+                print(f"✅ {current_player.name} 成功暗杠!")
+                input("\n按回车键继续...")
+                return True
+            else:
+                print(f"❌ {current_player.name} 暗杠失败，继续出牌。")
+
+    # 3. 智能选择打牌
     available_tiles = [t for t in current_player.hand_tiles 
                       if engine.rule.can_discard(current_player, t)]
     
@@ -339,6 +381,7 @@ def simulate_ai_turn(engine: GameEngine):
 
     # 使用AI算法选择最优出牌
     tile_to_discard = choose_best_discard_ai(current_player, available_tiles, engine)
+    print(f"即将打出: {tile_to_discard.value}{tile_to_discard.tile_type.value}")
     tile_display = format_large_mahjong_tile(tile_to_discard, color_code="1;34")
     print(f"\n🎯 {current_player.name}打出: {tile_display}")
     print("=" * 40)
@@ -360,11 +403,13 @@ def choose_best_discard_ai(player: Player, available_tiles: List[Tile], engine) 
     from ai.simple_ai import SimpleAI
     from ai.trainer_ai import TrainerAI
     from ai.aggressive_ai import AggressiveAI
+    from ai.mcts_ai import MctsAI
     
     # 根据玩家类型选择AI
     if player.player_type == PlayerType.AI_TRAINER:
         ai = TrainerAI()
     else:
+        # print(f"选择AI难度在打牌前: {player.player_type}")
         # 从引擎获取AI难度设置
         ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
         
@@ -372,8 +417,11 @@ def choose_best_discard_ai(player: Player, available_tiles: List[Tile], engine) 
             ai = SimpleAI("easy")
         elif ai_difficulty == "medium":
             ai = AggressiveAI("aggressive")
-        else:  # hard (暂未开放)
-            ai = SimpleAI("hard")  # 临时使用SimpleAI-hard
+        elif ai_difficulty == "hard":
+            ai = MctsAI(difficulty="hard", engine=engine)
+        else:  # expert 难度，使用 ShantenAI
+            # print(f"选了专家难度: {ai_difficulty}")
+            ai = ShantenAI(difficulty="hard")
     
     # 使用AI算法选择出牌
     return ai.choose_discard(player, available_tiles)
@@ -386,7 +434,7 @@ def handle_ai_responses(engine: GameEngine, last_discarder=None):
     actions = []
     # 收集所有AI玩家的可能动作
     for player in engine.players:
-        if player == last_discarder or player.player_type == PlayerType.HUMAN or getattr(player, 'has_won', False):
+        if player == last_discarder or player.player_type == PlayerType.HUMAN or getattr(player, 'is_winner', False):
             continue
 
         # 使用AI算法决定是否执行动作
@@ -443,16 +491,46 @@ def handle_ai_responses(engine: GameEngine, last_discarder=None):
         print(f"❌ {actor.name} 执行 {action_name} 失败。")
         return False
 
+def decide_hidden_gang_ai(player: Player, hidden_gang_tiles: List[Tile], engine: GameEngine) -> Tuple[bool, Optional[Tile]]:
+    """AI决定是否进行暗杠"""
+    if not hidden_gang_tiles:
+        return False, None
+    
+    # 获取AI难度设置
+    ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
+    
+    # 根据难度决定暗杠概率
+    gang_probability = 0.5  # 默认50%概率
+    
+    if ai_difficulty == "easy":
+        gang_probability = 0.3  # 简单AI较少暗杠
+    elif ai_difficulty == "medium":
+        gang_probability = 0.6  # 中等AI更积极
+    elif ai_difficulty == "hard":
+        gang_probability = 0.8  # 困难AI非常积极
+    else:  # expert
+        gang_probability = 0.9  # 专家AI几乎总是暗杠
+    
+    # 使用概率决定是否暗杠
+    import random
+    if random.random() < gang_probability:
+        # 选择第一个可暗杠的牌
+        return True, hidden_gang_tiles[0]
+    else:
+        return False, None
+
 def choose_best_action_ai(player: Player, available_actions: List[GameAction], engine: GameEngine) -> Optional[GameAction]:
     """AI智能选择最优响应动作"""
     from ai.simple_ai import SimpleAI
     from ai.trainer_ai import TrainerAI
     from ai.aggressive_ai import AggressiveAI
+    from ai.mcts_ai import MctsAI
     
     # 根据玩家类型选择AI
     if player.player_type == PlayerType.AI_TRAINER:
         ai = TrainerAI()
     else:
+        # print(f"选择AI难度在响应动作前: {player.player_type}")
         # 从引擎获取AI难度设置
         ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
         
@@ -460,8 +538,11 @@ def choose_best_action_ai(player: Player, available_actions: List[GameAction], e
             ai = SimpleAI("easy")
         elif ai_difficulty == "medium":
             ai = AggressiveAI("aggressive")
-        else:  # hard (暂未开放)
-            ai = SimpleAI("hard")  # 临时使用SimpleAI-hard
+        elif ai_difficulty == "hard":
+            ai = MctsAI(difficulty="hard", engine=engine)
+        else:  # expert 难度，使用 ShantenAI
+            # print(f"响应时选了专家难度: {ai_difficulty}")
+            ai = ShantenAI(difficulty="hard")
     
     # 构建上下文
     context = {
@@ -479,7 +560,7 @@ def check_response_actions(engine: GameEngine):
         return False
     
     human_player = engine.get_human_player()
-    if not human_player or getattr(human_player, 'has_won', False):
+    if not human_player or getattr(human_player, 'is_winner', False):
         return False
 
     # 在非出牌玩家的回合，才检查响应动作
@@ -579,16 +660,22 @@ def select_ai_difficulty():
     print("   • 适合有一定经验的玩家")
     
     print("\n🔥 Hard (困难)：")
-    print("   • 暂未开放 (需要流局率低于10%)")
-    print("   • 敬请期待后续版本更新")
+    print("   • 启用高级AI决策 (MctsAI)\n   • 使用蒙特卡洛树搜索，进行前瞻性决策，显著提升AI强度\n   • 推荐给希望挑战的资深玩家")
+    
+    print("\n🎯 Expert (专家)：")
+    print("   • 使用向听数AI (ShantenAI)")
+    print("   • 基于向听数和牌效率理论的高级算法")
+    print("   • 采用现代麻将理论，决策更加精准")
+    print("   • 推荐给追求极致挑战的高级玩家")
     
     while True:
         print(f"\n请选择AI难度:")
         print("  1 - Easy (简单)")
         print("  2 - Medium (中等)")
-        print("  3 - Hard (困难) [暂未开放]")
+        print("  3 - Hard (困难) [已启用]")
+        print("  4 - Expert (专家) [向听数AI] [新增]")
         
-        choice = input("\n请输入你的选择 (1-3): ").strip()
+        choice = input("\n请输入你的选择 (1-4): ").strip()
         
         if choice == "1":
             print("✅ 已选择 Easy 难度 - AI将使用简单策略")
@@ -597,11 +684,13 @@ def select_ai_difficulty():
             print("✅ 已选择 Medium 难度 - AI将使用激进策略")
             return "medium"
         elif choice == "3":
-            print("❌ Hard 难度暂未开放")
-            print("💡 提示：Hard难度正在开发中，需要确保流局率低于10%")
-            continue
+            print("✅ 已选择 Hard 难度 - AI将使用高级策略")
+            return "hard"
+        elif choice == "4":
+            print("✅ 已选择 Expert 难度 - AI将使用向听数算法")
+            return "expert"
         else:
-            print("❌ 无效选择，请输入 1、2 或 3")
+            print("❌ 无效选择，请输入 1、2、3 或 4")
 
 def handle_tile_exchange(engine):
     """处理换三张阶段的人类玩家交互"""
@@ -755,7 +844,7 @@ def main():
     # 设置游戏模式
     engine.setup_game(selected_mode, "sichuan")
     mode_name = "训练模式" if selected_mode == GameMode.TRAINING else "竞技模式"
-    difficulty_name = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(ai_difficulty, "中等")
+    difficulty_name = {"easy": "简单", "medium": "中等", "hard": "困难", "expert": "专家(向听数AI)"}.get(ai_difficulty, "中等")
     
     if selected_mode == GameMode.COMPETITIVE:
         print(f"✅ 游戏设置完成 - {mode_name}，四川麻将，AI难度：{difficulty_name}")
@@ -885,7 +974,7 @@ def main():
             print("错误：没有当前玩家。游戏提前结束。")
             break
 
-        if getattr(current_player, 'has_won', False):
+        if getattr(current_player, 'is_winner', False):
             engine.next_turn()
             continue
         
@@ -898,7 +987,7 @@ def main():
             
             # 1. 检查人类玩家的响应
             human_player = engine.get_human_player()
-            if human_player and human_player != last_discarder and not getattr(human_player, 'has_won', False):
+            if human_player and human_player != last_discarder and not getattr(human_player, 'is_winner', False):
                 can_act = any(engine.can_player_action(human_player, act) for act in [GameAction.WIN, GameAction.GANG, GameAction.PENG, GameAction.CHI])
                 if can_act:
                     human_had_chance_to_act = True
