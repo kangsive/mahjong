@@ -15,7 +15,6 @@ from collections import defaultdict, Counter
 from copy import deepcopy
 
 from rules.base_rule import BaseRule
-from rules.sichuan_rule import SichuanRule
 
 from .base_ai import BaseAI
 from game.tile import Tile, TileType, FengType, JianType

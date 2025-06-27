@@ -277,29 +277,40 @@ def simulate_human_turn(engine: GameEngine):
 
     # 检查是否可以暗杠
     hidden_gang_tiles = human_player.can_hidden_gang()
+    # 检查是否可以贴杠
+    add_gang_tiles = human_player.can_add_gang()
+    
+    gang_options = []
     if hidden_gang_tiles:
-        print(f"\n🔥 你可以暗杠！")
-        print("可暗杠的牌:")
-        for i, tile in enumerate(hidden_gang_tiles):
+        for tile in hidden_gang_tiles:
+            gang_options.append((tile, "暗杠"))
+    if add_gang_tiles:
+        for tile in add_gang_tiles:
+            gang_options.append((tile, "贴杠"))
+    
+    if gang_options:
+        print(f"\n🔥 你可以进行杠牌操作！")
+        print("可选择的杠牌:")
+        for i, (tile, gang_type) in enumerate(gang_options):
             tile_display = format_large_mahjong_tile(tile, color_code="1;32")
-            print(f"  {i+1}. {tile_display}")
+            print(f"  {i+1}. {tile_display} ({gang_type})")
         
-        choice = input("选择要暗杠的牌序号，或输入 'n' 跳过: ").strip().lower()
+        choice = input("选择要杠的牌序号，或输入 'n' 跳过: ").strip().lower()
         if choice.isdigit():
             idx = int(choice) - 1
-            if 0 <= idx < len(hidden_gang_tiles):
-                tile_to_gang = hidden_gang_tiles[idx]
+            if 0 <= idx < len(gang_options):
+                tile_to_gang, gang_type = gang_options[idx]
                 success = engine.execute_player_action(human_player, GameAction.GANG, tile_to_gang)
                 if success:
                     tile_display = format_large_mahjong_tile(tile_to_gang, color_code="1;32")
-                    print(f"✅ 成功暗杠 {tile_display}")
+                    print(f"✅ 成功{gang_type} {tile_display}")
                     return True
                 else:
-                    print(f"❌ 暗杠失败")
+                    print(f"❌ {gang_type}失败")
             else:
                 print(f"序号无效")
         elif choice != 'n':
-            print(f"输入无效，跳过暗杠")
+            print(f"输入无效，跳过杠牌操作")
 
     print(f"\n🎮 轮到{human_player.name}了! 请选择要打出的牌。")
 
@@ -356,20 +367,30 @@ def simulate_ai_turn(engine: GameEngine):
         else:
             print(f"❌ {current_player.name} 尝试自摸失败，继续出牌。")
 
-    # 2. 检查暗杠，使用AI决策
+    # 2. 检查杠牌（暗杠和贴杠），使用AI决策
     hidden_gang_tiles = current_player.can_hidden_gang()
+    add_gang_tiles = current_player.can_add_gang()
+    
+    gang_options = []
     if hidden_gang_tiles:
-        # 使用AI算法决定是否暗杠
-        should_gang, tile_to_gang = decide_hidden_gang_ai(current_player, hidden_gang_tiles, engine)
+        for tile in hidden_gang_tiles:
+            gang_options.append((tile, "暗杠"))
+    if add_gang_tiles:
+        for tile in add_gang_tiles:
+            gang_options.append((tile, "贴杠"))
+    
+    if gang_options:
+        # 使用AI算法决定是否进行杠牌操作
+        should_gang, tile_to_gang, gang_type = decide_gang_ai(current_player, gang_options, engine)
         if should_gang and tile_to_gang:
-            print(f"🔥 {current_player.name} 决定暗杠!")
+            print(f"🔥 {current_player.name} 决定{gang_type}!")
             success = engine.execute_player_action(current_player, GameAction.GANG, tile_to_gang)
             if success:
-                print(f"✅ {current_player.name} 成功暗杠!")
+                print(f"✅ {current_player.name} 成功{gang_type}!")
                 input("\n按回车键继续...")
                 return True
             else:
-                print(f"❌ {current_player.name} 暗杠失败，继续出牌。")
+                print(f"❌ {current_player.name} {gang_type}失败，继续出牌。")
 
     # 3. 智能选择打牌
     available_tiles = [t for t in current_player.hand_tiles 
@@ -503,6 +524,37 @@ def decide_hidden_gang_ai(player: Player, hidden_gang_tiles: List[Tile], engine:
         return True, hidden_gang_tiles[0]
     else:
         return False, None
+
+def decide_gang_ai(player: Player, gang_options: List[Tuple[Tile, str]], engine: GameEngine) -> Tuple[bool, Optional[Tile], str]:
+    """AI决定是否进行杠牌操作（包括暗杠和贴杠）"""
+    if not gang_options:
+        return False, None, ""
+    
+    # 获取AI难度设置
+    ai_difficulty = getattr(engine, 'ai_difficulty', 'medium')
+    
+    # 根据杠牌类型和难度决定概率
+    gang_probabilities = {}
+    
+    if ai_difficulty == "easy":
+        gang_probabilities = {"暗杠": 0.3, "贴杠": 0.4}  # 简单AI较少杠牌，但贴杠稍微积极些
+    elif ai_difficulty == "medium":
+        gang_probabilities = {"暗杠": 0.6, "贴杠": 0.7}  # 中等AI更积极
+    elif ai_difficulty == "hard":
+        gang_probabilities = {"暗杠": 0.8, "贴杠": 0.9}  # 困难AI非常积极，贴杠更积极
+    else:  # expert
+        gang_probabilities = {"暗杠": 0.9, "贴杠": 0.95}  # 专家AI几乎总是杠牌
+    
+    # 按优先级排序：贴杠优先于暗杠（因为贴杠更容易获得分数）
+    sorted_options = sorted(gang_options, key=lambda x: 0 if x[1] == "贴杠" else 1)
+    
+    import random
+    for tile, gang_type in sorted_options:
+        probability = gang_probabilities.get(gang_type, 0.5)
+        if random.random() < probability:
+            return True, tile, gang_type
+    
+    return False, None, ""
 
 def choose_best_action_ai(player: Player, available_actions: List[GameAction], engine: GameEngine) -> Optional[GameAction]:
     """AI智能选择最优响应动作"""

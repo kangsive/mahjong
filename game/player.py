@@ -143,6 +143,36 @@ class Player:
         
         return hidden_gang_tiles
     
+    def can_add_gang(self, tile: Optional[Tile] = None) -> List[Tile]:
+        """检查是否可以贴杠，返回可贴杠的牌列表"""
+        if tile:
+            # 检查特定牌是否可以贴杠
+            # 1. 手牌中必须有这张牌
+            if not any(str(t) == str(tile) for t in self.hand_tiles):
+                return []
+            # 2. 必须已经有这张牌的碰（副露）
+            for meld in self.melds:
+                if (meld.meld_type == MeldType.PENG and 
+                    len(meld.tiles) >= 1 and 
+                    str(meld.tiles[0]) == str(tile)):
+                    return [tile]
+            return []
+        
+        # 检查所有可以贴杠的牌
+        add_gang_tiles = []
+        
+        # 遍历所有的碰（副露）
+        for meld in self.melds:
+            if meld.meld_type == MeldType.PENG and len(meld.tiles) >= 1:
+                peng_tile = meld.tiles[0]  # 碰的牌（所有牌都相同）
+                # 检查手牌中是否有相同的牌进行贴杠
+                for hand_tile in self.hand_tiles:
+                    if str(hand_tile) == str(peng_tile):
+                        add_gang_tiles.append(hand_tile)
+                        break  # 一个碰只能贴杠一次，找到就跳出
+        
+        return add_gang_tiles
+    
     def can_chi(self, tile: Tile) -> List[List[Tile]]:
         """是否可以吃，返回可能的组合"""
         if not tile.is_number_tile():
@@ -317,6 +347,31 @@ class Player:
         self.is_winner = False
         self.can_win = False
         self.missing_suit = None
+    
+    def make_add_gang(self, tile: Tile) -> bool:
+        """执行贴杠"""
+        if not self.can_add_gang(tile):
+            return False
+        
+        # 从手牌中移除这张牌
+        if not self.remove_tile(tile):
+            return False
+        
+        # 找到对应的碰（副露）并转换为杠
+        for i, meld in enumerate(self.melds):
+            if (meld.meld_type == MeldType.PENG and 
+                len(meld.tiles) >= 1 and 
+                str(meld.tiles[0]) == str(tile)):
+                # 将这张牌加入到碰中形成杠
+                meld.tiles.append(tile)
+                # 改变类型为杠
+                meld.meld_type = MeldType.GANG
+                # 贴杠仍然是明杠，保持exposed=True
+                return True
+        
+        # 如果没找到对应的碰，恢复手牌
+        self.add_tile(tile)
+        return False
     
     def __str__(self):
         return f"Player({self.name}, {self.player_type.value}, 手牌:{len(self.hand_tiles)})" 

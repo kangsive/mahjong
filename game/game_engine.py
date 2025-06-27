@@ -146,6 +146,8 @@ class GameEngine:
         # 重置玩家
         for player in self.players:
             player.reset()
+            # 重置本局得分变化
+            player.last_score_change = 0
         
         # 重置牌堆
         self.deck.reset()
@@ -523,6 +525,11 @@ class GameEngine:
                 self.state == GameState.PLAYING and
                 len(player.can_hidden_gang()) > 0):
                 return True
+            # 贴杠：当前玩家的回合，可以把现有的碰（副露）转换为杠
+            if (player == self.get_current_player() and 
+                self.state == GameState.PLAYING and
+                len(player.can_add_gang()) > 0):
+                return True
             return False
         
         elif action == GameAction.CHI:
@@ -662,23 +669,37 @@ class GameEngine:
         return False
     
     def _execute_gang(self, player: Player, tile: Optional[Tile] = None) -> bool:
-        """执行杠牌（包含明杠和暗杠）"""
+        """执行杠牌（包含明杠、暗杠和贴杠）"""
         is_hidden_gang = False
+        is_add_gang = False
         gang_tile = None
         
-        # 判断是明杠还是暗杠
+        # 判断是明杠、暗杠还是贴杠
         if (self.last_discarded_tile and
             player != self.last_discard_player and
             player.can_gang(self.last_discarded_tile)):
+            # 明杠：杠别人打出的牌
             gang_tile = self.last_discarded_tile
             is_hidden_gang = False
+            is_add_gang = False
         elif tile and player == self.get_current_player():
-            # 暗杠：当前玩家的回合，杠自己手中的四张相同牌
+            # 检查是否为暗杠
             hidden_gang_tiles = player.can_hidden_gang(tile)
-            if not hidden_gang_tiles:  # 如果返回空列表，说明不能暗杠
-                return False
-            gang_tile = tile
-            is_hidden_gang = True
+            if hidden_gang_tiles:
+                # 暗杠：当前玩家的回合，杠自己手中的四张相同牌
+                gang_tile = tile
+                is_hidden_gang = True
+                is_add_gang = False
+            else:
+                # 检查是否为贴杠
+                add_gang_tiles = player.can_add_gang(tile)
+                if add_gang_tiles:
+                    # 贴杠：当前玩家的回合，把现有的碰（副露）转换为杠
+                    gang_tile = tile
+                    is_hidden_gang = False
+                    is_add_gang = True
+                else:
+                    return False
         else:
             return False
         
@@ -692,23 +713,58 @@ class GameEngine:
                         continue
                     p.score -= 2
                     player.score += 2
+                    # 记录本局得分变化
+                    if not hasattr(p, 'last_score_change'):
+                        p.last_score_change = 0
+                    if not hasattr(player, 'last_score_change'):
+                        player.last_score_change = 0
+                    p.last_score_change -= 2
+                    player.last_score_change += 2
+        elif is_add_gang:
+            success = player.make_add_gang(gang_tile)
+            # 贴杠立即结算：所有仍在场且未胡牌玩家各付 1 分（明杠计分）
+            if success:
+                for p in self.players:
+                    if p == player or getattr(p, 'is_winner', False):
+                        continue
+                    p.score -= 1
+                    player.score += 1
+                    # 记录本局得分变化
+                    if not hasattr(p, 'last_score_change'):
+                        p.last_score_change = 0
+                    if not hasattr(player, 'last_score_change'):
+                        player.last_score_change = 0
+                    p.last_score_change -= 1
+                    player.last_score_change += 1
         else:
             success = player.make_gang(gang_tile)
             # 明杠立即结算：放杠者支付 1 分
             if success and self.last_discard_player and self.last_discard_player != player:
                 self.last_discard_player.score -= 1
                 player.score += 1
+                # 记录本局得分变化
+                if not hasattr(self.last_discard_player, 'last_score_change'):
+                    self.last_discard_player.last_score_change = 0
+                if not hasattr(player, 'last_score_change'):
+                    player.last_score_change = 0
+                self.last_discard_player.last_score_change -= 1
+                player.last_score_change += 1
         
         if not success:
             return False
         
-        # 明杠需要从公共出牌池中移除被杠的牌
-        if not is_hidden_gang:
+        # 明杠和贴杠不需要从公共出牌池中移除牌（贴杠的牌来自手牌，明杠的牌在前面已经处理）
+        if not is_hidden_gang and not is_add_gang:
             self._remove_tile_from_discard_pool(gang_tile)
         
         # 检查是否流局（杠牌后需要摸牌）
         if not self.deck or self.deck.get_remaining_count() <= 0:
-            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            if is_hidden_gang:
+                gang_type = "暗杠"
+            elif is_add_gang:
+                gang_type = "贴杠"
+            else:
+                gang_type = "杠牌"
             self.logger.info(f"{gang_type}后无牌可摸，游戏流局")
             self._handle_draw_game()
             return True
@@ -718,13 +774,23 @@ class GameEngine:
         if new_tile:
             player.add_tile(new_tile)
             self.last_drawn_tile = new_tile  # 记录摸到的牌
-            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            if is_hidden_gang:
+                gang_type = "暗杠"
+            elif is_add_gang:
+                gang_type = "贴杠"
+            else:
+                gang_type = "杠牌"
             if player.player_type == PlayerType.HUMAN:
                 self.logger.info(f"{player.name} {gang_type}后摸了一张牌: {new_tile}")
             else:
                 self.logger.info(f"{player.name} {gang_type}后摸了一张牌")
         else:
-            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            if is_hidden_gang:
+                gang_type = "暗杠"
+            elif is_add_gang:
+                gang_type = "贴杠"
+            else:
+                gang_type = "杠牌"
             self.logger.warning(f"{gang_type}后摸牌失败")
             self._handle_draw_game()
             return True
@@ -736,14 +802,23 @@ class GameEngine:
         # 检查杠牌后是否可以胡牌
         if self.rule and self.rule.can_win(player):
             player.can_win = True
-            gang_type = "暗杠" if is_hidden_gang else "杠牌"
+            if is_hidden_gang:
+                gang_type = "暗杠"
+            elif is_add_gang:
+                gang_type = "贴杠"
+            else:
+                gang_type = "杠牌"
             self.logger.info(f"{player.name} {gang_type}后可以胡牌")
         
         # 杠牌后转换为正常游戏状态，让杠牌玩家继续出牌
         self.state = GameState.PLAYING
         
-        # 通知动作，传递是否为暗杠的信息
-        action_data = {"tile": gang_tile, "is_hidden": is_hidden_gang}
+        # 通知动作，传递杠的类型信息
+        action_data = {
+            "tile": gang_tile, 
+            "is_hidden": is_hidden_gang,
+            "is_add_gang": is_add_gang
+        }
         self._notify_player_action(player, GameAction.GANG, action_data)
         return True
     
@@ -819,9 +894,38 @@ class GameEngine:
                             self.active_players.remove(other_id)
                         all_winners.append(other_player)
             
-            # 为每个胡牌的玩家单独计分
-            for winner_player in all_winners:
-                # 计算得分，传递正确的自摸标志和放炮者信息
+            # 初始化所有玩家的本局得分变化
+            for p in self.players:
+                if not hasattr(p, 'last_score_change'):
+                    p.last_score_change = 0
+            
+            # 一炮多响计分逻辑：每个胡牌玩家都能得到完整的分数
+            if len(all_winners) > 1:
+                # 一炮多响情况（多人同时胡牌）
+                total_score_changes = {p.name: 0 for p in self.players}
+                
+                for winner_player in all_winners:
+                    # 计算每个胜者的得分
+                    scores = self.rule.calculate_score(
+                        winner_player, self.players, winner_tile, 
+                        is_self_draw=is_self_draw,
+                        discard_player=self.last_discard_player
+                    )
+                    
+                    # 累加得分变化
+                    for p in self.players:
+                        total_score_changes[p.name] += scores[p.name]
+                
+                # 一次性应用所有得分变化
+                for p in self.players:
+                    score_change = total_score_changes[p.name]
+                    p.score += score_change
+                    p.last_score_change += score_change
+                    
+                self.logger.info(f"一炮多响！{len(all_winners)}人同时胡牌")
+            else:
+                # 单人胡牌情况
+                winner_player = all_winners[0]
                 scores = self.rule.calculate_score(
                     winner_player, self.players, winner_tile, 
                     is_self_draw=is_self_draw,
@@ -832,23 +936,24 @@ class GameEngine:
                 for p in self.players:
                     score_change = scores[p.name]
                     p.score += score_change
-                    # 累加本局得分变化用于显示
-                    if not hasattr(p, 'last_score_change'):
-                        p.last_score_change = 0
                     p.last_score_change += score_change
                     
-                # 更新胜负记录
+            # 更新胜负记录
+            for winner_player in all_winners:
                 winner_player.wins += 1
-                for p in self.players:
-                    if p != winner_player and not getattr(p, 'is_winner', False):
-                        p.losses += 1
+            
+            # 为未胜利的玩家增加败场记录
+            for p in self.players:
+                if not getattr(p, 'is_winner', False):
+                    p.losses += 1
                 
-                # 记录胡牌类型用于显示
-                win_type = "自摸" if is_self_draw else "点炮胡"
+            # 记录胡牌信息
+            win_type = "自摸" if is_self_draw else "点炮胡"
+            rank_names = ["", "第一名", "第二名", "第三名", "第四名"]
+            
+            for i, winner_player in enumerate(all_winners):
                 current_rank = len([w for w in all_winners if self.winners.index(w.position) <= self.winners.index(winner_player.position)])
-                rank_names = ["", "第一名", "第二名", "第三名", "第四名"]
                 rank_name = rank_names[current_rank] if current_rank < len(rank_names) else f"第{current_rank}名"
-                
                 self.logger.info(f"{winner_player.name} {win_type}胡牌！获得{rank_name}！胡牌: {winner_tile}")
             
             # 血战到底：检查游戏是否结束
